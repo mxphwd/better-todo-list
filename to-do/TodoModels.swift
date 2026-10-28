@@ -31,19 +31,21 @@ enum ColorFamily: String, Codable, CaseIterable, Identifiable {
     case blue
     case purple
     case pink
+    case gray
 
     var id: Self { self }
 
-    var hue: Double {
+    var displayName: String {
         switch self {
-        case .red: 0.00
-        case .orange: 0.08
-        case .yellow: 0.14
-        case .green: 0.34
-        case .mint: 0.46
-        case .blue: 0.59
-        case .purple: 0.75
-        case .pink: 0.92
+        case .red: "Coral"
+        case .orange: "Warm orange"
+        case .yellow: "Butter"
+        case .green: "Soft green"
+        case .mint: "Seafoam"
+        case .blue: "Soft blue"
+        case .purple: "Lavender"
+        case .pink: "Soft pink"
+        case .gray: "Grayscale"
         }
     }
 }
@@ -56,9 +58,70 @@ struct ListColor: Codable, Hashable, Identifiable {
 
     var color: Color {
         let clampedShade = min(max(shade, 0), 4)
-        let saturation = 0.48 + (Double(clampedShade) * 0.09)
-        let brightness = 0.98 - (Double(clampedShade) * 0.105)
-        return Color(hue: family.hue, saturation: saturation, brightness: brightness)
+        let palette: [Color]
+
+        switch family {
+        case .orange:
+            palette = [
+                Color(red: 0.96, green: 0.76, blue: 0.64),
+                Color(red: 0.91, green: 0.64, blue: 0.49),
+                Color(red: 0.85, green: 0.49, blue: 0.34),
+                Color(red: 0.74, green: 0.37, blue: 0.24),
+                Color(red: 0.59, green: 0.27, blue: 0.17)
+            ]
+        case .green:
+            palette = [
+                Color(red: 0.76, green: 0.86, blue: 0.73),
+                Color(red: 0.63, green: 0.78, blue: 0.61),
+                Color(red: 0.49, green: 0.68, blue: 0.48),
+                Color(red: 0.36, green: 0.56, blue: 0.37),
+                Color(red: 0.25, green: 0.43, blue: 0.28)
+            ]
+        case .blue:
+            palette = [
+                Color(red: 0.77, green: 0.86, blue: 0.95),
+                Color(red: 0.64, green: 0.78, blue: 0.91),
+                Color(red: 0.50, green: 0.69, blue: 0.86),
+                Color(red: 0.37, green: 0.57, blue: 0.76),
+                Color(red: 0.27, green: 0.44, blue: 0.63)
+            ]
+        case .pink:
+            palette = [
+                Color(red: 0.95, green: 0.80, blue: 0.85),
+                Color(red: 0.90, green: 0.68, blue: 0.76),
+                Color(red: 0.84, green: 0.55, blue: 0.67),
+                Color(red: 0.73, green: 0.42, blue: 0.56),
+                Color(red: 0.60, green: 0.31, blue: 0.45)
+            ]
+        case .gray:
+            palette = [
+                Color(red: 0.88, green: 0.88, blue: 0.86),
+                Color(red: 0.68, green: 0.68, blue: 0.66),
+                Color(red: 0.47, green: 0.47, blue: 0.45),
+                Color(red: 0.27, green: 0.27, blue: 0.26),
+                Color(red: 0.06, green: 0.06, blue: 0.055)
+            ]
+        case .red:
+            palette = ListColor.fallbackPalette(hue: 0.01)
+        case .yellow:
+            palette = ListColor.fallbackPalette(hue: 0.135)
+        case .mint:
+            palette = ListColor.fallbackPalette(hue: 0.45)
+        case .purple:
+            palette = ListColor.fallbackPalette(hue: 0.72)
+        }
+
+        return palette[clampedShade]
+    }
+
+    private static func fallbackPalette(hue: Double) -> [Color] {
+        (0..<5).map { shade in
+            Color(
+                hue: hue,
+                saturation: 0.30 + (Double(shade) * 0.06),
+                brightness: 0.98 - (Double(shade) * 0.05)
+            )
+        }
     }
 
     static let blue = ListColor(family: .blue, shade: 2)
@@ -66,7 +129,7 @@ struct ListColor: Codable, Hashable, Identifiable {
     static let orange = ListColor(family: .orange, shade: 2)
     static let pink = ListColor(family: .pink, shade: 2)
     static let violet = ListColor(family: .purple, shade: 2)
-    static let gray = ListColor(family: .blue, shade: 4)
+    static let gray = ListColor(family: .gray, shade: 3)
 
     static let allCases: [ListColor] = ColorFamily.allCases.flatMap { family in
         (0..<5).map { ListColor(family: family, shade: $0) }

@@ -6,6 +6,8 @@ import ServiceManagement
 #endif
 
 struct ContentView: View {
+    let appState: AppNavigationState
+
     @State private var store = TodoStore()
     @State private var editingItem: TodoItem?
     @State private var isAddingList = false
@@ -21,6 +23,14 @@ struct ContentView: View {
                 isEditingList: $isEditingList,
                 isSidebarCompact: $isSidebarCompact
             )
+
+            if appState.isShowingAbout {
+                AboutAppView {
+                    appState.isShowingAbout = false
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(5)
+            }
 
             if let reminderID = store.presentedReminderID,
                let item = store.items.first(where: { $0.id == reminderID }) {
@@ -71,6 +81,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: store.presentedReminderID)
+        .animation(.easeInOut(duration: 0.22), value: appState.isShowingAbout)
     }
 }
 
@@ -686,9 +697,18 @@ struct TaskRow: View {
             }
 
             if hasSchedule {
+                let isOverdue = dueDate < Date() && !isCompleted
+                let overdueColor = Color(red: 1, green: 0.38, blue: 0.36)
+
                 Text(dueDate, format: .dateTime.month(.abbreviated).day().hour().minute())
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(dueDate < Date() && !isCompleted ? .red : .secondary)
+                    .font(
+                        .system(
+                            size: 9,
+                            weight: isOverdue ? .semibold : .medium,
+                            design: .rounded
+                        )
+                    )
+                    .foregroundStyle(isOverdue ? overdueColor : Color.secondary)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -880,13 +900,11 @@ struct ListEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             EditorHeader(title: modeTitle)
-            Form {
-                TextField("Name", text: $name)
-                ListIconPicker(selection: $symbol)
-                ListColorPalette(selection: $color)
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+            ListEditorFields(
+                name: $name,
+                symbol: $symbol,
+                color: $color
+            )
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
@@ -902,7 +920,7 @@ struct ListEditor: View {
                 Divider().opacity(0.45)
             }
         }
-        .frame(width: 430, height: 490)
+        .frame(width: 430)
         .background(Color.black.opacity(0.16))
         .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
@@ -912,6 +930,22 @@ struct ListEditor: View {
         case .add: "New list"
         case .edit: "Edit list"
         }
+    }
+}
+
+struct ListEditorFields: View {
+    @Binding var name: String
+    @Binding var symbol: String
+    @Binding var color: ListColor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            ListIconPicker(selection: $symbol)
+            ListColorPalette(selection: $color)
+        }
+        .padding(16)
     }
 }
 
@@ -973,6 +1007,10 @@ struct ListIconPicker: View {
 struct ListColorPalette: View {
     @Binding var selection: ListColor
 
+    private let paletteFamilies: [ColorFamily] = [
+        .orange, .green, .blue, .pink, .gray
+    ]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text("Color")
@@ -980,7 +1018,7 @@ struct ListColorPalette: View {
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 6) {
-                ForEach(ColorFamily.allCases) { family in
+                ForEach(paletteFamilies) { family in
                     HStack(spacing: 7) {
                         ForEach(0..<5, id: \.self) { shade in
                             let option = ListColor(family: family, shade: shade)
@@ -1002,12 +1040,77 @@ struct ListColorPalette: View {
                                     }
                             }
                             .buttonStyle(.plain)
-                            .help("\(family.rawValue.capitalized), shade \(shade + 1)")
+                            .help("\(family.displayName), shade \(shade + 1)")
                         }
                     }
                 }
             }
         }
+    }
+}
+
+struct AboutAppView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Spacer()
+
+                #if os(macOS)
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 136, height: 136)
+                    .accessibilityLabel("to-do app icon")
+                #endif
+
+                VStack(spacing: 5) {
+                    Text("to-do")
+                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+
+                    Text("Version \(appVersion)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Source code", action: openSourceCode)
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(14)
+            .help("Close About")
+            .keyboardShortcut(.cancelAction)
+        }
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "1.0"
+    }
+
+    private func openSourceCode() {
+        #if os(macOS)
+        guard let url = URL(string: "https://github.com/mxphwd/better-todo-list") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+        #endif
     }
 }
 
@@ -1104,6 +1207,6 @@ extension Color {
 }
 
 #Preview {
-    ContentView()
+    ContentView(appState: AppNavigationState())
         .frame(width: 900, height: 600)
 }
