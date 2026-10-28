@@ -20,6 +20,7 @@ struct WindowChromeConfigurator: NSViewRepresentable {
 final class WindowChromeView: NSView {
     private var desiredCompactMode = false
     private var appliedCompactMode: Bool?
+    private weak var configuredWindow: NSWindow?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -42,11 +43,22 @@ final class WindowChromeView: NSView {
 
         guard let appliedCompactMode else {
             self.appliedCompactMode = desiredCompactMode
+            window.contentMinSize = NSSize(
+                width: desiredCompactMode ? 284 : 400,
+                height: 380
+            )
             return
         }
         guard appliedCompactMode != desiredCompactMode else { return }
 
         self.appliedCompactMode = desiredCompactMode
+
+        let compactMinimumSize = NSSize(width: 284, height: 380)
+        let expandedMinimumSize = NSSize(width: 400, height: 380)
+
+        // Relax the width constraint before resizing so AppKit does not snap
+        // the window to the expanded minimum ahead of the animation.
+        window.contentMinSize = compactMinimumSize
 
         let sidebarWidthDifference: CGFloat = 116
         let widthChange = desiredCompactMode
@@ -73,15 +85,22 @@ final class WindowChromeView: NSView {
             context.timingFunction = CAMediaTimingFunction(
                 controlPoints: 0.42,
                 0,
-                0.20,
+                0.58,
                 1
             )
             context.allowsImplicitAnimation = true
             window.animator().setFrame(targetFrame, display: true)
+        } completionHandler: {
+            window.contentMinSize = self.desiredCompactMode
+                ? compactMinimumSize
+                : expandedMinimumSize
         }
     }
 
     private func configureTransparentWindow(_ window: NSWindow) {
+        guard configuredWindow !== window else { return }
+        configuredWindow = window
+
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
@@ -90,6 +109,10 @@ final class WindowChromeView: NSView {
 
         window.contentView?.wantsLayer = true
         window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
+
+        window.identifier = NSUserInterfaceItemIdentifier("MainTodoWindow")
+        window.setFrameAutosaveName("MainTodoWindowFrame")
+        window.isRestorable = true
     }
 
     private func hideNativeWindowButtons(in window: NSWindow) {

@@ -2,6 +2,7 @@ import SwiftUI
 
 #if os(macOS)
 import AppKit
+import ServiceManagement
 #endif
 
 struct ContentView: View {
@@ -35,7 +36,7 @@ struct ContentView: View {
                 .zIndex(10)
             }
         }
-        .frame(minWidth: isSidebarCompact ? 284 : 400, minHeight: 380)
+        .frame(minWidth: 284, minHeight: 380)
         .ignoresSafeArea(.container, edges: .top)
         #if os(macOS)
         .background(WindowChromeConfigurator(isCompact: isSidebarCompact))
@@ -110,9 +111,12 @@ struct SidebarView: View {
             SidebarWindowControls(isCompact: isCompact)
 
             SidebarHeader(
-                activeCount: store.activeCount,
                 isCompact: isCompact,
-                onToggleCompact: { isCompact.toggle() }
+                onToggleCompact: {
+                    withAnimation(.easeInOut(duration: 0.30)) {
+                        isCompact.toggle()
+                    }
+                }
             )
 
             ScrollView {
@@ -159,11 +163,11 @@ struct SidebarView: View {
             )
         }
         .background(.thinMaterial)
+        .animation(.easeInOut(duration: 0.30), value: isCompact)
     }
 }
 
 struct SidebarHeader: View {
-    let activeCount: Int
     let isCompact: Bool
     let onToggleCompact: () -> Void
 
@@ -176,10 +180,6 @@ struct SidebarHeader: View {
                     .tracking(-0.35)
 
                 Spacer()
-
-                Text(activeCount, format: .number)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tertiary)
 
                 SidebarToggleButton(
                     isCompact: false,
@@ -275,6 +275,8 @@ struct SidebarRow: View {
 }
 
 struct SidebarFooter: View {
+    @State private var isShowingOptions = false
+
     let canDelete: Bool
     let isCompact: Bool
     let onAdd: () -> Void
@@ -282,22 +284,184 @@ struct SidebarFooter: View {
     let onDelete: () -> Void
 
     var body: some View {
-        let layout = isCompact
-            ? AnyLayout(VStackLayout(spacing: 3))
-            : AnyLayout(HStackLayout(spacing: 2))
-
-        layout {
+        SidebarFooterLayout(compactProgress: isCompact ? 1 : 0) {
             CompactIconButton(symbol: "plus", help: "Add list", action: onAdd)
             CompactIconButton(symbol: "pencil", help: "Edit selected list", action: onEdit)
             CompactIconButton(symbol: "trash", help: "Delete selected list", action: onDelete)
                 .disabled(!canDelete)
+            SidebarOptionsButton(isPresented: $isShowingOptions)
         }
-        .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
-        .padding(isCompact ? 5 : 8)
-        .frame(height: isCompact ? 88 : 38)
+        .padding(.horizontal, isCompact ? 0 : 8)
+        .frame(maxWidth: .infinity)
+        .frame(height: isCompact ? 118 : 38)
+        .animation(.easeInOut(duration: 0.30), value: isCompact)
         .overlay(alignment: .top) {
             Divider().opacity(0.28)
         }
+    }
+}
+
+struct SidebarFooterLayout: Layout, Animatable {
+    var compactProgress: CGFloat
+
+    var animatableData: CGFloat {
+        get { compactProgress }
+        set { compactProgress = newValue }
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let contentWidth = sizes.reduce(0) { $0 + $1.width } + 4
+        let contentHeight = sizes.reduce(0) { $0 + $1.height } + 12
+
+        return CGSize(
+            width: proposal.width ?? contentWidth,
+            height: proposal.height ?? contentHeight
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let verticalSpacing: CGFloat = 4
+        let totalVerticalHeight = sizes.reduce(0) { $0 + $1.height }
+            + verticalSpacing * CGFloat(max(0, subviews.count - 1))
+
+        var horizontalX = bounds.minX
+        var verticalY = bounds.midY - totalVerticalHeight / 2
+
+        for (index, subview) in subviews.enumerated() {
+            let size = sizes[index]
+            let horizontalPosition = CGPoint(
+                x: index == subviews.count - 1 ? bounds.maxX - size.width : horizontalX,
+                y: bounds.midY - size.height / 2
+            )
+            let verticalPosition = CGPoint(
+                x: bounds.midX - size.width / 2,
+                y: verticalY
+            )
+            let position = CGPoint(
+                x: horizontalPosition.x
+                    + (verticalPosition.x - horizontalPosition.x) * compactProgress,
+                y: horizontalPosition.y
+                    + (verticalPosition.y - horizontalPosition.y) * compactProgress
+            )
+
+            subview.place(
+                at: position,
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+
+            if index < subviews.count - 1 {
+                horizontalX += size.width + 2
+                verticalY += size.height + verticalSpacing
+            }
+        }
+    }
+}
+
+struct SidebarOptionsButton: View {
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        CompactIconButton(symbol: "gearshape", help: "Options") {
+            isPresented.toggle()
+        }
+        .popover(isPresented: $isPresented, arrowEdge: .leading) {
+            OptionsPopover()
+        }
+    }
+}
+
+struct OptionsPopover: View {
+    @State private var launchesAtLogin: Bool
+    @State private var requiresApproval = false
+    @State private var errorMessage: String?
+
+    init() {
+        #if os(macOS)
+        let status = SMAppService.mainApp.status
+        _launchesAtLogin = State(
+            initialValue: status == .enabled || status == .requiresApproval
+        )
+        _requiresApproval = State(initialValue: status == .requiresApproval)
+        #else
+        _launchesAtLogin = State(initialValue: false)
+        #endif
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Options")
+                .font(.system(size: 13, weight: .semibold))
+
+            Toggle("Open at login", isOn: $launchesAtLogin)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .onChange(of: launchesAtLogin) { _, isEnabled in
+                    updateLaunchAtLogin(isEnabled)
+                }
+
+            if requiresApproval {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Approval is required in System Settings before the app can open at login.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+
+                    Button("Open Login Items Settings") {
+                        #if os(macOS)
+                        SMAppService.openSystemSettingsLoginItems()
+                        #endif
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+        .background(.thinMaterial)
+    }
+
+    private func updateLaunchAtLogin(_ isEnabled: Bool) {
+        #if os(macOS)
+        errorMessage = nil
+
+        do {
+            let service = SMAppService.mainApp
+            if isEnabled {
+                if service.status == .notRegistered || service.status == .notFound {
+                    try service.register()
+                }
+            } else if service.status == .enabled || service.status == .requiresApproval {
+                try service.unregister()
+            }
+
+            let status = service.status
+            requiresApproval = status == .requiresApproval
+            launchesAtLogin = status == .enabled || status == .requiresApproval
+        } catch {
+            let status = SMAppService.mainApp.status
+            requiresApproval = status == .requiresApproval
+            launchesAtLogin = status == .enabled || status == .requiresApproval
+            errorMessage = error.localizedDescription
+        }
+        #endif
     }
 }
 
