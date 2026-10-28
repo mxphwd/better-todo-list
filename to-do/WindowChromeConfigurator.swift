@@ -37,6 +37,7 @@ final class WindowChromeView: NSView {
 
     private func applyWindowConfiguration() {
         guard let window else { return }
+        configureTransparentWindow(window)
         hideNativeWindowButtons(in: window)
 
         guard let appliedCompactMode else {
@@ -78,6 +79,17 @@ final class WindowChromeView: NSView {
             context.allowsImplicitAnimation = true
             window.animator().setFrame(targetFrame, display: true)
         }
+    }
+
+    private func configureTransparentWindow(_ window: NSWindow) {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+
+        window.contentView?.wantsLayer = true
+        window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     private func hideNativeWindowButtons(in window: NSWindow) {

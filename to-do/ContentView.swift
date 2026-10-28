@@ -94,16 +94,7 @@ struct TodoWorkspace: View {
 
             TaskListView(store: store, editingItem: $editingItem)
         }
-        .background {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.10, green: 0.12, blue: 0.16),
-                    Color(red: 0.035, green: 0.04, blue: 0.055)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+        .background(Color.clear)
         .animation(.easeInOut(duration: 0.30), value: isSidebarCompact)
     }
 }
@@ -167,7 +158,7 @@ struct SidebarView: View {
                 onDelete: store.deleteSelectedList
             )
         }
-        .background(.ultraThinMaterial)
+        .background(.thinMaterial)
     }
 }
 
