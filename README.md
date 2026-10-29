@@ -6,7 +6,9 @@ Lightweight, elegant and completely free to-do list application for macOS.
 
 + Competely free with no in-app purchases
 + Designed and built natively for Apple Silicon
-+ Lightweight in size (656 KB)
++ Fully supports macOS 27.0 Golden Gate
++ Lightweight in size (<800 KB)
++ Alphabetical order and time order sort options + custom order
 + Compact sidebar mode
 + Sleek and elegant design inspired from frosted glass
 
