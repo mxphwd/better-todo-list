@@ -775,6 +775,8 @@ struct TaskListView: View {
             TaskListHeader(
                 title: store.selectedList?.name ?? "Tasks",
                 count: store.visibleItems.filter { !$0.isCompleted }.count,
+                sortMode: store.selectedTaskSortMode,
+                onSortModeChange: store.setTaskSortMode,
                 onAdd: addItem
             )
 
@@ -805,11 +807,17 @@ struct TaskListView: View {
                             }
                         }
                     }
+                    .reorderable()
                     .onDelete { offsets in
                         let items = offsets.compactMap { index in
                             store.visibleItems.indices.contains(index) ? store.visibleItems[index] : nil
                         }
                         requestDeletion(for: items)
+                    }
+                }
+                .reorderContainer(for: TodoItem.self) { difference in
+                    withAnimation(.easeInOut(duration: 0.20)) {
+                        store.applyItemReorder(difference)
                     }
                 }
                 .listStyle(.inset)
@@ -859,6 +867,8 @@ struct TaskListView: View {
 struct TaskListHeader: View {
     let title: String
     let count: Int
+    let sortMode: TaskSortMode
+    let onSortModeChange: (TaskSortMode) -> Void
     let onAdd: () -> Void
 
     var body: some View {
@@ -873,6 +883,10 @@ struct TaskListHeader: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
+            TaskOrganizeMenu(
+                selection: sortMode,
+                onSelect: onSortModeChange
+            )
             Button(action: onAdd) {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
@@ -887,6 +901,55 @@ struct TaskListHeader: View {
         .frame(height: 58)
         .overlay(alignment: .bottom) {
             Divider().opacity(0.45)
+        }
+    }
+}
+
+struct TaskOrganizeMenu: View {
+    let selection: TaskSortMode
+    let onSelect: (TaskSortMode) -> Void
+
+    var body: some View {
+        Menu {
+            Button {
+                onSelect(.custom)
+            } label: {
+                Label("Custom", systemImage: selection == .custom ? "checkmark" : "hand.draw")
+            }
+
+            Divider()
+
+            Menu("Date & Time", systemImage: "calendar") {
+                sortButton("Ascending", systemImage: "arrow.up", mode: .dateAscending)
+                sortButton("Descending", systemImage: "arrow.down", mode: .dateDescending)
+            }
+
+            Menu("ABC", systemImage: "textformat") {
+                sortButton("Ascending", systemImage: "arrow.up", mode: .alphabeticalAscending)
+                sortButton("Descending", systemImage: "arrow.down", mode: .alphabeticalDescending)
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 7, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(.secondary)
+        .help("Organize tasks")
+    }
+
+    private func sortButton(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        mode: TaskSortMode
+    ) -> some View {
+        Button {
+            onSelect(mode)
+        } label: {
+            Label(title, systemImage: selection == mode ? "checkmark" : systemImage)
         }
     }
 }

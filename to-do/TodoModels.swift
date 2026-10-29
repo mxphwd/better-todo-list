@@ -20,6 +20,15 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var hasFocusReminder: Bool
     var reminderWasShown: Bool
     var createdAt: Date
+    var manualOrder: Int? = nil
+}
+
+enum TaskSortMode: String, Codable {
+    case custom
+    case dateAscending
+    case dateDescending
+    case alphabeticalAscending
+    case alphabeticalDescending
 }
 
 enum ColorFamily: String, Codable, CaseIterable, Identifiable {
@@ -184,6 +193,7 @@ struct TodoSnapshot: Codable {
     var lists: [TodoList]
     var items: [TodoItem]
     var sidebarEntries: [SidebarEntry]?
+    var taskSortModes: [UUID: TaskSortMode]?
 }
 
 @MainActor
@@ -195,6 +205,7 @@ final class TodoStore {
     var selectedListID: UUID?
     var selectedItemID: UUID?
     var presentedReminderID: UUID?
+    var taskSortModes: [UUID: TaskSortMode] = [:]
 
     private let storageKey = "focus.todo.snapshot.v1"
 
@@ -219,11 +230,26 @@ final class TodoStore {
         items.first { $0.id == selectedItemID }
     }
 
+    var selectedTaskSortMode: TaskSortMode {
+        guard let selectedListID else { return .custom }
+        return taskSortModes[selectedListID] ?? .custom
+    }
+
     var visibleItems: [TodoItem] {
         guard let selectedListID else { return [] }
         return items
             .filter { $0.listID == selectedListID }
             .sorted {
+                if let leftOrder = $0.manualOrder, let rightOrder = $1.manualOrder,
+                   leftOrder != rightOrder {
+                    return leftOrder < rightOrder
+                }
+                if $0.manualOrder != nil && $1.manualOrder == nil {
+                    return true
+                }
+                if $0.manualOrder == nil && $1.manualOrder != nil {
+                    return false
+                }
                 if $0.isCompleted != $1.isCompleted {
                     return !$0.isCompleted
                 }
@@ -353,10 +379,111 @@ final class TodoStore {
             }
             items[index] = revised
         } else {
+            revised.manualOrder = nextManualOrder(in: revised.listID)
             items.append(revised)
         }
+        reinsertItemAccordingToPreference(revised.id)
         selectedItemID = revised.id
         save()
+    }
+
+    func setTaskSortMode(_ mode: TaskSortMode) {
+        guard let selectedListID else { return }
+        taskSortModes[selectedListID] = mode
+        if mode != .custom {
+            let sortedItems = visibleItems.sorted { sortedBefore($0, $1, mode: mode) }
+            assignManualOrder(to: sortedItems)
+        }
+        save()
+    }
+
+    func applyItemReorder(
+        _ difference: ReorderDifference<
+            TodoItem.ID,
+            ReorderableSingleCollectionIdentifier
+        >
+    ) {
+        var reorderedItems = visibleItems
+        let movedItems = difference.sources.compactMap { id in
+            reorderedItems.first { $0.id == id }
+        }
+        reorderedItems.removeAll { difference.sources.contains($0.id) }
+
+        switch difference.destination.position {
+        case .before(let targetID):
+            if let targetIndex = reorderedItems.firstIndex(where: { $0.id == targetID }) {
+                reorderedItems.insert(contentsOf: movedItems, at: targetIndex)
+            } else {
+                reorderedItems.append(contentsOf: movedItems)
+            }
+        case .end:
+            reorderedItems.append(contentsOf: movedItems)
+        }
+
+        for (order, reorderedItem) in reorderedItems.enumerated() {
+            if let itemIndex = items.firstIndex(where: { $0.id == reorderedItem.id }) {
+                items[itemIndex].manualOrder = order
+            }
+        }
+        save()
+    }
+
+    private func nextManualOrder(in listID: TodoList.ID) -> Int {
+        items
+            .filter { $0.listID == listID }
+            .compactMap(\.manualOrder)
+            .max()
+            .map { $0 + 1 }
+            ?? items.filter { $0.listID == listID }.count
+    }
+
+    private func reinsertItemAccordingToPreference(_ id: TodoItem.ID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        let mode = taskSortModes[item.listID] ?? .custom
+        guard mode != .custom else { return }
+
+        var orderedItems = items
+            .filter { $0.listID == item.listID && $0.id != id }
+            .sorted { ($0.manualOrder ?? Int.max) < ($1.manualOrder ?? Int.max) }
+        let insertionIndex = orderedItems.firstIndex {
+            sortedBefore(item, $0, mode: mode)
+        } ?? orderedItems.endIndex
+        orderedItems.insert(item, at: insertionIndex)
+        assignManualOrder(to: orderedItems)
+    }
+
+    private func assignManualOrder(to orderedItems: [TodoItem]) {
+        for (order, item) in orderedItems.enumerated() {
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                items[index].manualOrder = order
+            }
+        }
+    }
+
+    private func sortedBefore(_ left: TodoItem, _ right: TodoItem, mode: TaskSortMode) -> Bool {
+        if left.isCompleted != right.isCompleted {
+            return !left.isCompleted
+        }
+
+        switch mode {
+        case .custom:
+            return (left.manualOrder ?? Int.max) < (right.manualOrder ?? Int.max)
+        case .dateAscending, .dateDescending:
+            if left.hasSchedule != right.hasSchedule {
+                return left.hasSchedule
+            }
+            guard left.hasSchedule else {
+                return left.createdAt < right.createdAt
+            }
+            return mode == .dateAscending
+                ? left.dueDate < right.dueDate
+                : left.dueDate > right.dueDate
+        case .alphabeticalAscending, .alphabeticalDescending:
+            let comparison = left.title.localizedCaseInsensitiveCompare(right.title)
+            return mode == .alphabeticalAscending
+                ? comparison == .orderedAscending
+                : comparison == .orderedDescending
+        }
     }
 
     func toggleCompleted(_ id: UUID) {
@@ -419,6 +546,7 @@ final class TodoStore {
            !snapshot.lists.isEmpty {
             lists = snapshot.lists
             items = snapshot.items
+            taskSortModes = snapshot.taskSortModes ?? [:]
             sidebarEntries = sanitizedSidebarEntries(
                 snapshot.sidebarEntries,
                 lists: lists
@@ -496,7 +624,8 @@ final class TodoStore {
         let snapshot = TodoSnapshot(
             lists: lists,
             items: items,
-            sidebarEntries: sidebarEntries
+            sidebarEntries: sidebarEntries,
+            taskSortModes: taskSortModes
         )
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
