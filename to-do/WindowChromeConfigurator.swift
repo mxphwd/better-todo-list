@@ -40,6 +40,7 @@ final class WindowChromeView: NSView {
         guard let window else { return }
         configureTransparentWindow(window)
         hideNativeWindowButtons(in: window)
+        removeUnusedMainMenus()
 
         guard let appliedCompactMode else {
             self.appliedCompactMode = desiredCompactMode
@@ -113,6 +114,17 @@ final class WindowChromeView: NSView {
         window.identifier = NSUserInterfaceItemIdentifier("MainTodoWindow")
         window.setFrameAutosaveName("MainTodoWindowFrame")
         window.isRestorable = true
+    }
+
+    private func removeUnusedMainMenus() {
+        guard let mainMenu = NSApp.mainMenu else {
+            return
+        }
+
+        let unusedTitles = Set(["View", "Format", "Help"])
+        for item in mainMenu.items where unusedTitles.contains(item.title) {
+            mainMenu.removeItem(item)
+        }
     }
 
     private func hideNativeWindowButtons(in window: NSWindow) {

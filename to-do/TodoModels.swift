@@ -170,9 +170,20 @@ struct ListColor: Codable, Hashable, Identifiable {
     }
 }
 
+struct SidebarEntry: Identifiable, Codable, Equatable {
+    enum Kind: Codable, Equatable {
+        case list(UUID)
+        case divider
+    }
+
+    let id: UUID
+    var kind: Kind
+}
+
 struct TodoSnapshot: Codable {
     var lists: [TodoList]
     var items: [TodoItem]
+    var sidebarEntries: [SidebarEntry]?
 }
 
 @MainActor
@@ -180,6 +191,7 @@ struct TodoSnapshot: Codable {
 final class TodoStore {
     var lists: [TodoList] = []
     var items: [TodoItem] = []
+    var sidebarEntries: [SidebarEntry] = []
     var selectedListID: UUID?
     var selectedItemID: UUID?
     var presentedReminderID: UUID?
@@ -192,6 +204,15 @@ final class TodoStore {
 
     var selectedList: TodoList? {
         lists.first { $0.id == selectedListID }
+    }
+
+    var orderedLists: [TodoList] {
+        sidebarEntries.compactMap { entry in
+            guard case .list(let listID) = entry.kind else {
+                return nil
+            }
+            return lists.first { $0.id == listID }
+        }
     }
 
     var selectedItem: TodoItem? {
@@ -220,6 +241,9 @@ final class TodoStore {
     func addList(name: String, symbol: String, color: ListColor) {
         let list = TodoList(id: UUID(), name: name, symbol: symbol, color: color)
         lists.append(list)
+        sidebarEntries.append(
+            SidebarEntry(id: UUID(), kind: .list(list.id))
+        )
         selectedListID = list.id
         save()
     }
@@ -232,10 +256,75 @@ final class TodoStore {
 
     func deleteSelectedList() {
         guard let selectedListID, lists.count > 1 else { return }
-        items.removeAll { $0.listID == selectedListID }
-        lists.removeAll { $0.id == selectedListID }
-        self.selectedListID = lists.first?.id
+        deleteList(selectedListID)
+    }
+
+    func deleteList(_ id: TodoList.ID) {
+        guard lists.contains(where: { $0.id == id }), lists.count > 1 else { return }
+        items.removeAll { $0.listID == id }
+        lists.removeAll { $0.id == id }
+        sidebarEntries.removeAll { entry in
+            entry.kind == .list(id)
+        }
+        if selectedListID == id {
+            selectedListID = orderedLists.first?.id
+        }
         selectedItemID = nil
+        save()
+    }
+
+    func addDivider() {
+        let divider = SidebarEntry(id: UUID(), kind: .divider)
+
+        if let selectedListID,
+           let selectedEntryIndex = sidebarEntries.firstIndex(where: {
+               $0.kind == .list(selectedListID)
+           }) {
+            sidebarEntries.insert(divider, at: selectedEntryIndex + 1)
+        } else {
+            sidebarEntries.append(divider)
+        }
+
+        save()
+    }
+
+    func deleteDivider(_ id: SidebarEntry.ID) {
+        sidebarEntries.removeAll { entry in
+            entry.id == id && entry.kind == .divider
+        }
+        save()
+    }
+
+    func applySidebarReorder(
+        _ difference: ReorderDifference<
+            SidebarEntry.ID,
+            ReorderableSingleCollectionIdentifier
+        >
+    ) {
+        var movedEntries: [SidebarEntry] = []
+
+        for id in difference.sources {
+            if let entry = sidebarEntries.first(where: { $0.id == id }) {
+                movedEntries.append(entry)
+            }
+        }
+
+        sidebarEntries.removeAll { difference.sources.contains($0.id) }
+
+        switch difference.destination.position {
+        case .before(let targetID):
+            guard let targetIndex = sidebarEntries.firstIndex(where: {
+                $0.id == targetID
+            }) else {
+                sidebarEntries.append(contentsOf: movedEntries)
+                save()
+                return
+            }
+            sidebarEntries.insert(contentsOf: movedEntries, at: targetIndex)
+        case .end:
+            sidebarEntries.append(contentsOf: movedEntries)
+        }
+
         save()
     }
 
@@ -330,7 +419,11 @@ final class TodoStore {
            !snapshot.lists.isEmpty {
             lists = snapshot.lists
             items = snapshot.items
-            selectedListID = lists.first?.id
+            sidebarEntries = sanitizedSidebarEntries(
+                snapshot.sidebarEntries,
+                lists: lists
+            )
+            selectedListID = orderedLists.first?.id
             return
         }
 
@@ -338,6 +431,9 @@ final class TodoStore {
         let work = TodoList(id: UUID(), name: "Work", symbol: "briefcase", color: .blue)
         let personal = TodoList(id: UUID(), name: "Personal", symbol: "person", color: .mint)
         lists = [today, work, personal]
+        sidebarEntries = lists.map { list in
+            SidebarEntry(id: UUID(), kind: .list(list.id))
+        }
         selectedListID = today.id
         items = [
             TodoItem(
@@ -368,8 +464,40 @@ final class TodoStore {
         save()
     }
 
+    private func sanitizedSidebarEntries(
+        _ savedEntries: [SidebarEntry]?,
+        lists: [TodoList]
+    ) -> [SidebarEntry] {
+        let validListIDs = Set(lists.map(\.id))
+        var entries = (savedEntries ?? []).filter { entry in
+            switch entry.kind {
+            case .list(let listID):
+                validListIDs.contains(listID)
+            case .divider:
+                true
+            }
+        }
+
+        let referencedListIDs = Set(entries.compactMap { entry -> UUID? in
+            guard case .list(let listID) = entry.kind else {
+                return nil
+            }
+            return listID
+        })
+
+        for list in lists where !referencedListIDs.contains(list.id) {
+            entries.append(SidebarEntry(id: UUID(), kind: .list(list.id)))
+        }
+
+        return entries
+    }
+
     private func save() {
-        let snapshot = TodoSnapshot(lists: lists, items: items)
+        let snapshot = TodoSnapshot(
+            lists: lists,
+            items: items,
+            sidebarEntries: sidebarEntries
+        )
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
     }

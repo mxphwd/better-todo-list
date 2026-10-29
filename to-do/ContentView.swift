@@ -5,14 +5,31 @@ import AppKit
 import ServiceManagement
 #endif
 
+enum DeletionKind {
+    case task
+    case list
+    case divider
+}
+
+struct PendingDeletion: Identifiable {
+    let id = UUID()
+    let kind: DeletionKind
+    let targetIDs: [UUID]
+    let title: String
+    let name: String
+    let detail: String
+}
+
 struct ContentView: View {
     let appState: AppNavigationState
 
+    @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
     @State private var store = TodoStore()
     @State private var editingItem: TodoItem?
     @State private var isAddingList = false
     @State private var isEditingList = false
     @State private var isSidebarCompact = false
+    @State private var pendingDeletion: PendingDeletion?
 
     var body: some View {
         ZStack {
@@ -21,7 +38,8 @@ struct ContentView: View {
                 editingItem: $editingItem,
                 isAddingList: $isAddingList,
                 isEditingList: $isEditingList,
-                isSidebarCompact: $isSidebarCompact
+                isSidebarCompact: $isSidebarCompact,
+                onRequestDeletion: requestDeletion
             )
 
             if appState.isShowingAbout {
@@ -44,6 +62,18 @@ struct ContentView: View {
                 )
                 .transition(.opacity)
                 .zIndex(10)
+            }
+
+            if let pendingDeletion {
+                DeleteConfirmationView(
+                    title: pendingDeletion.title,
+                    name: pendingDeletion.name,
+                    detail: pendingDeletion.detail,
+                    onCancel: { self.pendingDeletion = nil },
+                    onDelete: { performDeletion(pendingDeletion) }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(20)
             }
         }
         .frame(minWidth: 284, minHeight: 380)
@@ -80,8 +110,70 @@ struct ContentView: View {
                 store.checkReminders()
             }
         }
+        .modifier(ListMenuSyncModifier(appState: appState, store: store))
         .animation(.easeInOut(duration: 0.22), value: store.presentedReminderID)
         .animation(.easeInOut(duration: 0.22), value: appState.isShowingAbout)
+        .animation(.easeOut(duration: 0.14), value: pendingDeletion?.id)
+    }
+
+    private func requestDeletion(_ deletion: PendingDeletion) {
+        if confirmBeforeDeleting {
+            pendingDeletion = deletion
+        } else {
+            performDeletion(deletion)
+        }
+    }
+
+    private func performDeletion(_ deletion: PendingDeletion) {
+        switch deletion.kind {
+        case .task:
+            deletion.targetIDs.forEach(store.deleteItem)
+        case .list:
+            if let id = deletion.targetIDs.first {
+                store.deleteList(id)
+            }
+        case .divider:
+            if let id = deletion.targetIDs.first {
+                store.deleteDivider(id)
+            }
+        }
+        pendingDeletion = nil
+    }
+}
+
+struct ListMenuSyncModifier: ViewModifier {
+    let appState: AppNavigationState
+    let store: TodoStore
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                syncListNames(store.orderedLists)
+            }
+            .onChange(of: store.lists) {
+                syncListNames(store.orderedLists)
+            }
+            .onChange(of: store.sidebarEntries) {
+                syncListNames(store.orderedLists)
+            }
+            .onChange(of: appState.listSelectionRevision) {
+                selectRequestedList()
+            }
+    }
+
+    private func syncListNames(_ lists: [TodoList]) {
+        appState.listNames = lists.map(\.name)
+    }
+
+    private func selectRequestedList() {
+        let index = appState.requestedListIndex
+        let orderedLists = store.orderedLists
+        guard orderedLists.indices.contains(index) else {
+            return
+        }
+
+        store.selectedListID = orderedLists[index].id
+        appState.isShowingAbout = false
     }
 }
 
@@ -91,6 +183,7 @@ struct TodoWorkspace: View {
     @Binding var isAddingList: Bool
     @Binding var isEditingList: Bool
     @Binding var isSidebarCompact: Bool
+    let onRequestDeletion: (PendingDeletion) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -98,13 +191,18 @@ struct TodoWorkspace: View {
                 store: store,
                 isAddingList: $isAddingList,
                 isEditingList: $isEditingList,
-                isCompact: $isSidebarCompact
+                isCompact: $isSidebarCompact,
+                onRequestDeletion: onRequestDeletion
             )
             .frame(width: isSidebarCompact ? 44 : 160)
 
             Divider()
 
-            TaskListView(store: store, editingItem: $editingItem)
+            TaskListView(
+                store: store,
+                editingItem: $editingItem,
+                onRequestDeletion: onRequestDeletion
+            )
         }
         .background(Color.clear)
         .animation(.easeInOut(duration: 0.30), value: isSidebarCompact)
@@ -116,6 +214,7 @@ struct SidebarView: View {
     @Binding var isAddingList: Bool
     @Binding var isEditingList: Bool
     @Binding var isCompact: Bool
+    let onRequestDeletion: (PendingDeletion) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,33 +231,23 @@ struct SidebarView: View {
 
             ScrollView {
                 LazyVStack(spacing: 4) {
-                    ForEach(store.lists) { list in
-                        Button {
-                            store.selectedListID = list.id
-                        } label: {
-                            SidebarRow(
-                                name: list.name,
-                                symbol: list.symbol,
-                                color: list.color.color,
-                                count: store.items.filter {
-                                    $0.listID == list.id && !$0.isCompleted
-                                }.count,
-                                isSelected: store.selectedListID == list.id,
-                                isCompact: isCompact
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Edit List") {
-                                store.selectedListID = list.id
+                    ForEach(store.sidebarEntries) { entry in
+                        SidebarEntryRow(
+                            entry: entry,
+                            store: store,
+                            isCompact: isCompact,
+                            onRequestDeletion: onRequestDeletion,
+                            onEditList: { listID in
+                                store.selectedListID = listID
                                 isEditingList = true
                             }
-                            Button("Delete List", role: .destructive) {
-                                store.selectedListID = list.id
-                                store.deleteSelectedList()
-                            }
-                            .disabled(store.lists.count <= 1)
-                        }
+                        )
+                    }
+                    .reorderable()
+                }
+                .reorderContainer(for: SidebarEntry.self) { difference in
+                    withAnimation(.easeInOut(duration: 0.20)) {
+                        store.applySidebarReorder(difference)
                     }
                 }
                 .padding(.horizontal, isCompact ? 5 : 9)
@@ -168,13 +257,105 @@ struct SidebarView: View {
             SidebarFooter(
                 canDelete: store.lists.count > 1,
                 isCompact: isCompact,
-                onAdd: { isAddingList = true },
+                onAddList: { isAddingList = true },
+                onAddDivider: store.addDivider,
                 onEdit: { isEditingList = true },
-                onDelete: store.deleteSelectedList
+                onDelete: requestSelectedListDeletion
             )
         }
         .background(.thinMaterial)
         .animation(.easeInOut(duration: 0.30), value: isCompact)
+    }
+
+    private func requestSelectedListDeletion() {
+        guard let list = store.selectedList else { return }
+        onRequestDeletion(Self.deletion(for: list))
+    }
+
+    static func deletion(for list: TodoList) -> PendingDeletion {
+        PendingDeletion(
+            kind: .list,
+            targetIDs: [list.id],
+            title: "Delete list",
+            name: list.name,
+            detail: "Type “delete” below to permanently remove this list and all of its tasks. Press ESC to cancel this process."
+        )
+    }
+}
+
+struct SidebarEntryRow: View {
+    let entry: SidebarEntry
+    let store: TodoStore
+    let isCompact: Bool
+    let onRequestDeletion: (PendingDeletion) -> Void
+    let onEditList: (UUID) -> Void
+
+    var body: some View {
+        switch entry.kind {
+        case .list(let listID):
+            if let list = store.lists.first(where: { $0.id == listID }) {
+                Button {
+                    store.selectedListID = list.id
+                } label: {
+                    SidebarRow(
+                        name: list.name,
+                        symbol: list.symbol,
+                        color: list.color.color,
+                        count: store.items.filter {
+                            $0.listID == list.id && !$0.isCompleted
+                        }.count,
+                        isSelected: store.selectedListID == list.id,
+                        isCompact: isCompact
+                    )
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Edit List") {
+                        onEditList(list.id)
+                    }
+                    Button("Delete List", role: .destructive) {
+                        onRequestDeletion(SidebarView.deletion(for: list))
+                    }
+                    .disabled(store.lists.count <= 1)
+                }
+            }
+        case .divider:
+            SidebarDividerRow(isCompact: isCompact)
+                .contextMenu {
+                    Button("Delete Divider", role: .destructive) {
+                        onRequestDeletion(
+                            PendingDeletion(
+                                kind: .divider,
+                                targetIDs: [entry.id],
+                                title: "Delete divider",
+                                name: "List divider",
+                                detail: "Type “delete” below to permanently remove this divider. Press ESC to cancel this process."
+                            )
+                        )
+                    }
+                }
+        }
+    }
+}
+
+struct SidebarDividerRow: View {
+    let isCompact: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.34))
+                .frame(height: 1)
+
+            if !isCompact {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 7, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(height: 18)
+        .contentShape(Rectangle())
+        .help("Drag to reorder divider")
     }
 }
 
@@ -290,13 +471,17 @@ struct SidebarFooter: View {
 
     let canDelete: Bool
     let isCompact: Bool
-    let onAdd: () -> Void
+    let onAddList: () -> Void
+    let onAddDivider: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         SidebarFooterLayout(compactProgress: isCompact ? 1 : 0) {
-            CompactIconButton(symbol: "plus", help: "Add list", action: onAdd)
+            SidebarAddMenu(
+                onAddList: onAddList,
+                onAddDivider: onAddDivider
+            )
             CompactIconButton(symbol: "pencil", help: "Edit selected list", action: onEdit)
             CompactIconButton(symbol: "trash", help: "Delete selected list", action: onDelete)
                 .disabled(!canDelete)
@@ -309,6 +494,32 @@ struct SidebarFooter: View {
         .overlay(alignment: .top) {
             Divider().opacity(0.28)
         }
+    }
+}
+
+struct SidebarAddMenu: View {
+    let onAddList: () -> Void
+    let onAddDivider: () -> Void
+
+    var body: some View {
+        Menu {
+            Button("New List", systemImage: "plus", action: onAddList)
+            Button(
+                "Add Divider",
+                systemImage: "rectangle.split.1x2",
+                action: onAddDivider
+            )
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(.secondary)
+        .help("Add list or divider")
     }
 }
 
@@ -394,6 +605,7 @@ struct SidebarOptionsButton: View {
 }
 
 struct OptionsPopover: View {
+    @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
     @State private var launchesAtLogin: Bool
     @State private var requiresApproval = false
     @State private var errorMessage: String?
@@ -421,6 +633,10 @@ struct OptionsPopover: View {
                 .onChange(of: launchesAtLogin) { _, isEnabled in
                     updateLaunchAtLogin(isEnabled)
                 }
+
+            Toggle("Confirm before deleting", isOn: $confirmBeforeDeleting)
+                .toggleStyle(.switch)
+                .controlSize(.small)
 
             if requiresApproval {
                 VStack(alignment: .leading, spacing: 7) {
@@ -552,6 +768,7 @@ struct WindowActionButton: View {
 struct TaskListView: View {
     @Bindable var store: TodoStore
     @Binding var editingItem: TodoItem?
+    let onRequestDeletion: (PendingDeletion) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -584,14 +801,15 @@ struct TaskListView: View {
                             Button("Edit") { editingItem = item }
                             Divider()
                             Button("Delete", role: .destructive) {
-                                store.deleteItem(item.id)
+                                requestDeletion(for: [item])
                             }
                         }
                     }
                     .onDelete { offsets in
-                        for index in offsets {
-                            store.deleteItem(store.visibleItems[index].id)
+                        let items = offsets.compactMap { index in
+                            store.visibleItems.indices.contains(index) ? store.visibleItems[index] : nil
                         }
+                        requestDeletion(for: items)
                     }
                 }
                 .listStyle(.inset)
@@ -604,8 +822,8 @@ struct TaskListView: View {
                     editingItem = store.selectedItem
                 },
                 onDelete: {
-                    if let id = store.selectedItemID {
-                        store.deleteItem(id)
+                    if let item = store.selectedItem {
+                        requestDeletion(for: [item])
                     }
                 }
             )
@@ -615,6 +833,26 @@ struct TaskListView: View {
 
     private func addItem() {
         editingItem = store.addItem()
+    }
+
+    private func requestDeletion(for items: [TodoItem]) {
+        guard !items.isEmpty else { return }
+        let isMultiple = items.count > 1
+        onRequestDeletion(
+            PendingDeletion(
+                kind: .task,
+                targetIDs: items.map(\.id),
+                title: isMultiple ? "Delete tasks" : "Delete task",
+                name: isMultiple ? "\(items.count) selected tasks" : displayName(for: items[0]),
+                detail: isMultiple
+                    ? "Type “delete” below to permanently remove these tasks. Press ESC to cancel this process."
+                    : "Type “delete” below to permanently remove this task. Press ESC to cancel this process."
+            )
+        )
+    }
+
+    private func displayName(for item: TodoItem) -> String {
+        item.title.isEmpty ? "Untitled task" : item.title
     }
 }
 
@@ -780,6 +1018,166 @@ struct CompactIconButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help(help)
+    }
+}
+
+struct DeleteConfirmationView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isTextFieldFocused: Bool
+    @State private var confirmationText = ""
+    @State private var isBursting = false
+
+    let title: String
+    let name: String
+    let detail: String
+    let onCancel: () -> Void
+    let onDelete: () -> Void
+
+    private let requiredText = "delete"
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+
+            confirmationCard
+                .scaleEffect(isBursting ? 1.08 : 1)
+                .opacity(isBursting ? 0 : 1)
+                .blur(radius: isBursting ? 4 : 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            isTextFieldFocused = true
+        }
+        .onExitCommand(perform: onCancel)
+    }
+
+    private var confirmationCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                Image(systemName: "trash")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(progressColor)
+                    .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.headline)
+                    Text(name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+
+            Divider()
+
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("delete", text: $confirmationText)
+                .textFieldStyle(.plain)
+                .font(.system(.body, design: .monospaced))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(fieldBackground, in: RoundedRectangle(cornerRadius: 7))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(progressColor.opacity(validPrefix ? 0.35 + progress * 0.55 : 0.18))
+                }
+                .focused($isTextFieldFocused)
+                .onSubmit(confirmDeletion)
+
+            HStack(spacing: 6) {
+                Text("Press ENTER to confirm. You can’t go back.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .opacity(isComplete ? 1 : 0)
+
+                Spacer()
+
+                HStack(spacing: 3) {
+                    ForEach(0..<requiredText.count, id: \.self) { index in
+                        Capsule()
+                            .fill(
+                                validPrefix && index < confirmationText.count
+                                    ? Color.red.opacity(0.35 + progress * 0.65)
+                                    : Color.secondary.opacity(0.18)
+                            )
+                            .frame(width: 9, height: 3)
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+            .frame(height: 13)
+        }
+        .padding(14)
+        .frame(width: 336)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(progressColor.opacity(validPrefix ? 0.16 + progress * 0.38 : 0.1))
+        }
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
+        .keyframeAnimator(
+            initialValue: CGFloat.zero,
+            trigger: confirmationText
+        ) { content, offset in
+            content.offset(x: offset)
+        } keyframes: { _ in
+            let amount = validPrefix ? 1.5 + progress * 7 : 0
+            LinearKeyframe(-amount, duration: 0.035)
+            LinearKeyframe(amount, duration: 0.05)
+            LinearKeyframe(-amount * 0.7, duration: 0.045)
+            LinearKeyframe(amount * 0.45, duration: 0.04)
+            LinearKeyframe(0, duration: 0.035)
+        }
+        .animation(.easeOut(duration: 0.12), value: progress)
+        .animation(.easeOut(duration: 0.1), value: isComplete)
+    }
+
+    private var validPrefix: Bool {
+        !confirmationText.isEmpty && requiredText.hasPrefix(confirmationText)
+    }
+
+    private var isComplete: Bool {
+        confirmationText == requiredText
+    }
+
+    private var progress: Double {
+        guard validPrefix else { return 0 }
+        return min(1, Double(confirmationText.count) / Double(requiredText.count))
+    }
+
+    private var progressColor: Color {
+        validPrefix ? .red.opacity(0.35 + progress * 0.65) : .secondary
+    }
+
+    private var fieldBackground: Color {
+        validPrefix ? .red.opacity(0.04 + progress * 0.14) : .secondary.opacity(0.08)
+    }
+
+    private func confirmDeletion() {
+        guard isComplete, !isBursting else { return }
+
+        if reduceMotion {
+            onDelete()
+            return
+        }
+
+        withAnimation(.easeOut(duration: 0.05)) {
+            isBursting = true
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(35))
+            onDelete()
+        }
     }
 }
 
