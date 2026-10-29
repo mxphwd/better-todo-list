@@ -1459,22 +1459,15 @@ struct AboutAppView: View {
             VStack(spacing: 18) {
                 Spacer()
 
-                #if os(macOS)
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 136, height: 136)
-                    .accessibilityLabel("to-do app icon")
-                #endif
+                Text("to-do")
+                    .font(.system(size: 68, weight: .semibold, design: .serif))
+                    .italic()
+                    .tracking(-1.4)
+                    .accessibilityAddTraits(.isHeader)
 
-                VStack(spacing: 5) {
-                    Text("to-do")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-
-                    Text("Version \(appVersion)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
+                Text("Version \(appVersion)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
 
                 Button("Source code", action: openSourceCode)
                     .buttonStyle(.bordered)
