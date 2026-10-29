@@ -1474,6 +1474,14 @@ struct AboutAppView: View {
                     .controlSize(.regular)
 
                 Spacer()
+
+                Button("Developed by Sebastian", action: openDeveloperProfile)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .underline(true, color: Color.secondary.opacity(0.35))
+                    .help("Open github.com/mxphwd")
+                    .padding(.bottom, 14)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -1498,6 +1506,15 @@ struct AboutAppView: View {
     private func openSourceCode() {
         #if os(macOS)
         guard let url = URL(string: "https://github.com/mxphwd/better-todo-list") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+        #endif
+    }
+
+    private func openDeveloperProfile() {
+        #if os(macOS)
+        guard let url = URL(string: "https://github.com/mxphwd") else {
             return
         }
         NSWorkspace.shared.open(url)
