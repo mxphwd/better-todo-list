@@ -476,7 +476,7 @@ struct SidebarHeader: View {
             }
             .frame(width: 134)
             .opacity(isCompact ? 0 : 1)
-            .offset(x: isCompact ? 3 : 13)
+            .offset(x: 13)
             .allowsHitTesting(!isCompact)
 
             SidebarToggleButton(
