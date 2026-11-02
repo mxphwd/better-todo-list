@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct ShoppingItem: Identifiable, Codable, Equatable {
     let id: UUID
@@ -252,7 +255,7 @@ struct AdmissionTimeline {
 extension TodoStore {
     func itemCount(in list: TodoList) -> Int {
         switch list.listKind {
-        case .standard:
+        case .standard, .packing, .mealPlanner, .habits:
             items.filter { $0.listID == list.id && !$0.isCompleted }.count
         case .shopping:
             shoppingItems.filter { $0.listID == list.id && !$0.isPurchased }.count
@@ -383,7 +386,7 @@ struct SpecialListDetailView: View {
                 AssignmentListView(store: store, list: list)
             case .collegeAdmissions:
                 CollegeAdmissionListView(store: store, list: list)
-            case .standard:
+            case .standard, .packing, .mealPlanner, .habits:
                 EmptyView()
             }
         }
@@ -455,6 +458,11 @@ struct ShoppingListView: View {
                                 store.deleteShoppingItem(item.id)
                             }
                         }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button("Delete", role: .destructive) {
+                                store.deleteShoppingItem(item.id)
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)
@@ -518,11 +526,19 @@ struct ShoppingItemRow: View {
 
             Spacer()
 
-            if let url = URL(string: item.urlString), !item.urlString.isEmpty {
-                Link(destination: url) {
-                    Image(systemName: "link")
-                        .font(.system(size: 9))
+            if !item.urlString.isEmpty {
+                Button(action: openProductPage) {
+                    HStack(spacing: 3) {
+                        Text("Buy")
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .frame(height: 20)
+                    .background(Color.blue, in: Capsule())
                 }
+                .buttonStyle(.plain)
                 .help("Open product page")
             }
 
@@ -531,6 +547,17 @@ struct ShoppingItemRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: onEdit)
+    }
+
+    private func openProductPage() {
+        #if os(macOS)
+        let trimmed = item.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let url = URL(string: address),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return }
+        NSWorkspace.shared.open(url)
+        #endif
     }
 }
 
@@ -590,6 +617,11 @@ struct RecurringListView: View {
                         )
                         .contextMenu {
                             Button("Edit") { editingItem = item }
+                            Button("Delete", role: .destructive) {
+                                store.deleteRecurringItem(item.id)
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             Button("Delete", role: .destructive) {
                                 store.deleteRecurringItem(item.id)
                             }
@@ -718,6 +750,11 @@ struct AssignmentListView: View {
                                 store.deleteAssignment(item.id)
                             }
                         }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button("Delete", role: .destructive) {
+                                store.deleteAssignment(item.id)
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)
@@ -804,20 +841,24 @@ struct CollegeAdmissionListView: View {
             if applications.isEmpty {
                 SpecialEmptyView(symbol: "building.columns", title: "No applications yet")
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(applications) { application in
-                            CollegeApplicationRow(
-                                application: application,
-                                onToggleStar: {
-                                    store.toggleCollegeApplicationStar(application.id)
-                                },
-                                onEdit: { editingApplication = application }
-                            )
-                            Divider().padding(.leading, 12)
+                List {
+                    ForEach(applications) { application in
+                        CollegeApplicationRow(
+                            application: application,
+                            onToggleStar: {
+                                store.toggleCollegeApplicationStar(application.id)
+                            },
+                            onEdit: { editingApplication = application }
+                        )
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button("Delete", role: .destructive) {
+                                store.deleteCollegeApplication(application.id)
+                            }
                         }
                     }
                 }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
             }
         }
         .sheet(item: $editingApplication) { application in

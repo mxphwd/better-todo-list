@@ -33,9 +33,6 @@ struct MyApp: App {
                 }
             }
 
-            CommandGroup(replacing: .undoRedo) {}
-            CommandGroup(replacing: .pasteboard) {}
-            CommandGroup(replacing: .textEditing) {}
             CommandGroup(replacing: .textFormatting) {}
             CommandGroup(replacing: .help) {}
 

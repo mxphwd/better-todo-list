@@ -8,6 +8,16 @@ enum TodoListKind: String, Codable, CaseIterable {
     case recurring
     case assignments
     case collegeAdmissions
+    case packing
+    case mealPlanner
+    case habits
+
+    var usesStandardTasks: Bool {
+        switch self {
+        case .standard, .packing, .mealPlanner, .habits: true
+        case .shopping, .recurring, .assignments, .collegeAdmissions: false
+        }
+    }
 }
 
 struct TodoList: Identifiable, Codable, Equatable {
@@ -305,12 +315,12 @@ final class TodoStore {
     }
 
     func deleteSelectedList() {
-        guard let selectedListID, lists.count > 1 else { return }
+        guard let selectedListID else { return }
         deleteList(selectedListID)
     }
 
     func deleteList(_ id: TodoList.ID) {
-        guard lists.contains(where: { $0.id == id }), lists.count > 1 else { return }
+        guard lists.contains(where: { $0.id == id }) else { return }
         items.removeAll { $0.listID == id }
         shoppingItems.removeAll { $0.listID == id }
         recurringItems.removeAll { $0.listID == id }
@@ -569,10 +579,24 @@ final class TodoStore {
         presentedReminderID = nil
     }
 
+    func resetAllData() {
+        lists = []
+        items = []
+        sidebarEntries = []
+        selectedListID = nil
+        selectedItemID = nil
+        presentedReminderID = nil
+        taskSortModes = [:]
+        shoppingItems = []
+        recurringItems = []
+        assignments = []
+        collegeApplications = []
+        save()
+    }
+
     private func load() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
-           let snapshot = try? JSONDecoder().decode(TodoSnapshot.self, from: data),
-           !snapshot.lists.isEmpty {
+           let snapshot = try? JSONDecoder().decode(TodoSnapshot.self, from: data) {
             lists = snapshot.lists
             items = snapshot.items
             taskSortModes = snapshot.taskSortModes ?? [:]

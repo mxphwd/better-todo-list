@@ -31,6 +31,7 @@ struct ContentView: View {
     @State private var isEditingList = false
     @State private var isSidebarCompact = false
     @State private var pendingDeletion: PendingDeletion?
+    @State private var isShowingResetConfirmation = false
 
     var body: some View {
         ZStack {
@@ -41,7 +42,8 @@ struct ContentView: View {
                 newListKind: $newListKind,
                 isEditingList: $isEditingList,
                 isSidebarCompact: $isSidebarCompact,
-                onRequestDeletion: requestDeletion
+                onRequestDeletion: requestDeletion,
+                onResetAllData: { isShowingResetConfirmation = true }
             )
 
             if appState.isShowingAbout {
@@ -67,7 +69,7 @@ struct ContentView: View {
             }
 
             if let pendingDeletion {
-                DeleteConfirmationView(
+                TripleDeleteConfirmationView(
                     title: pendingDeletion.title,
                     name: pendingDeletion.name,
                     detail: pendingDeletion.detail,
@@ -77,6 +79,21 @@ struct ContentView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 .zIndex(20)
             }
+
+            if isShowingResetConfirmation {
+                DeleteConfirmationView(
+                    title: "Reset all lists",
+                    name: "This wipes the app clean",
+                    detail: "Type “delete” below to remove every custom list and item. Nothing can be recovered, and the app will restart completely empty.",
+                    onCancel: { isShowingResetConfirmation = false },
+                    onDelete: {
+                        store.resetAllData()
+                        isShowingResetConfirmation = false
+                    }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(30)
+            }
         }
         .frame(minWidth: 284, minHeight: 380)
         .ignoresSafeArea(.container, edges: .top)
@@ -85,7 +102,7 @@ struct ContentView: View {
         #endif
         .preferredColorScheme(.dark)
         .sheet(item: $editingItem) { item in
-            TaskEditor(item: item, lists: store.lists.filter { $0.listKind == .standard }) { updated in
+            TaskEditor(item: item, lists: store.lists.filter { $0.listKind.usesStandardTasks }) { updated in
                 store.updateItem(updated)
             }
         }
@@ -187,6 +204,7 @@ struct TodoWorkspace: View {
     @Binding var isEditingList: Bool
     @Binding var isSidebarCompact: Bool
     let onRequestDeletion: (PendingDeletion) -> Void
+    let onResetAllData: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -196,13 +214,14 @@ struct TodoWorkspace: View {
                 newListKind: $newListKind,
                 isEditingList: $isEditingList,
                 isCompact: $isSidebarCompact,
-                onRequestDeletion: onRequestDeletion
+                onRequestDeletion: onRequestDeletion,
+                onResetAllData: onResetAllData
             )
             .frame(width: isSidebarCompact ? 44 : 160)
 
             Divider()
 
-            if let selectedList = store.selectedList, selectedList.listKind != .standard {
+            if let selectedList = store.selectedList, !selectedList.listKind.usesStandardTasks {
                 SpecialListDetailView(store: store, list: selectedList)
             } else {
                 TaskListView(
@@ -224,6 +243,7 @@ struct SidebarView: View {
     @Binding var isEditingList: Bool
     @Binding var isCompact: Bool
     let onRequestDeletion: (PendingDeletion) -> Void
+    let onResetAllData: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -238,33 +258,42 @@ struct SidebarView: View {
                 }
             )
 
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(store.sidebarEntries) { entry in
-                        SidebarEntryRow(
-                            entry: entry,
-                            store: store,
-                            isCompact: isCompact,
-                            onRequestDeletion: onRequestDeletion,
-                            onEditList: { listID in
-                                store.selectedListID = listID
-                                isEditingList = true
-                            }
+            List {
+                ForEach(store.sidebarEntries) { entry in
+                    SidebarEntryRow(
+                        entry: entry,
+                        store: store,
+                        isCompact: isCompact,
+                        onRequestDeletion: onRequestDeletion,
+                        onEditList: { listID in
+                            store.selectedListID = listID
+                            isEditingList = true
+                        }
+                    )
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 2,
+                            leading: isCompact ? 5 : 9,
+                            bottom: 2,
+                            trailing: isCompact ? 5 : 9
                         )
-                    }
-                    .reorderable()
+                    )
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
-                .reorderContainer(for: SidebarEntry.self) { difference in
-                    withAnimation(.easeInOut(duration: 0.20)) {
-                        store.applySidebarReorder(difference)
-                    }
-                }
-                .padding(.horizontal, isCompact ? 5 : 9)
-                .padding(.vertical, 8)
+                .reorderable()
             }
+            .reorderContainer(for: SidebarEntry.self) { difference in
+                withAnimation(.easeInOut(duration: 0.20)) {
+                    store.applySidebarReorder(difference)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .contentMargins(.vertical, 6, for: .scrollContent)
 
             SidebarFooter(
-                canDelete: store.lists.count > 1,
+                canDelete: store.selectedList != nil,
                 isCompact: isCompact,
                 onAddList: { kind in
                     newListKind = kind
@@ -272,7 +301,8 @@ struct SidebarView: View {
                 },
                 onAddDivider: store.addDivider,
                 onEdit: { isEditingList = true },
-                onDelete: requestSelectedListDeletion
+                onDelete: requestSelectedListDeletion,
+                onResetAllData: onResetAllData
             )
         }
         .background(.thinMaterial)
@@ -290,7 +320,7 @@ struct SidebarView: View {
             targetIDs: [list.id],
             title: "Delete list",
             name: list.name,
-            detail: "Type “delete” below to permanently remove this list and all of its tasks. Press ESC to cancel this process."
+            detail: "Click Delete three times to permanently remove this list and all of its items. Press ESC to cancel."
         )
     }
 }
@@ -326,7 +356,11 @@ struct SidebarEntryRow: View {
                     Button("Delete List", role: .destructive) {
                         onRequestDeletion(SidebarView.deletion(for: list))
                     }
-                    .disabled(store.lists.count <= 1)
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button("Delete", role: .destructive) {
+                        onRequestDeletion(SidebarView.deletion(for: list))
+                    }
                 }
             }
         case .divider:
@@ -339,7 +373,7 @@ struct SidebarEntryRow: View {
                                 targetIDs: [entry.id],
                                 title: "Delete divider",
                                 name: "List divider",
-                                detail: "Type “delete” below to permanently remove this divider. Press ESC to cancel this process."
+                                detail: "Click Delete three times to permanently remove this divider. Press ESC to cancel."
                             )
                         )
                     }
@@ -352,17 +386,9 @@ struct SidebarDividerRow: View {
     let isCompact: Bool
 
     var body: some View {
-        HStack(spacing: 5) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.34))
-                .frame(height: 1)
-
-            if !isCompact {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 7, weight: .medium))
-                    .foregroundStyle(.tertiary)
-            }
-        }
+        Rectangle()
+            .fill(Color.secondary.opacity(0.34))
+            .frame(height: 1)
         .frame(height: 18)
         .contentShape(Rectangle())
         .help("Drag to reorder divider")
@@ -485,6 +511,7 @@ struct SidebarFooter: View {
     let onAddDivider: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onResetAllData: () -> Void
 
     var body: some View {
         SidebarFooterLayout(compactProgress: isCompact ? 1 : 0) {
@@ -495,7 +522,10 @@ struct SidebarFooter: View {
             CompactIconButton(symbol: "pencil", help: "Edit selected list", action: onEdit)
             CompactIconButton(symbol: "trash", help: "Delete selected list", action: onDelete)
                 .disabled(!canDelete)
-            SidebarOptionsButton(isPresented: $isShowingOptions)
+            SidebarOptionsButton(
+                isPresented: $isShowingOptions,
+                onResetAllData: onResetAllData
+            )
         }
         .padding(.horizontal, isCompact ? 0 : 8)
         .frame(maxWidth: .infinity)
@@ -513,7 +543,7 @@ struct SidebarAddMenu: View {
 
     var body: some View {
         Menu {
-            Button("New List", systemImage: "list.bullet") {
+            Button("New Custom List", systemImage: "list.bullet") {
                 onAddList(.standard)
             }
             Menu("Special List", systemImage: "sparkles") {
@@ -528,6 +558,16 @@ struct SidebarAddMenu: View {
                 }
                 Button("College Admission Tracker", systemImage: "building.columns") {
                     onAddList(.collegeAdmissions)
+                }
+                Divider()
+                Button("Packing List", systemImage: "suitcase") {
+                    onAddList(.packing)
+                }
+                Button("Meal Planner", systemImage: "fork.knife") {
+                    onAddList(.mealPlanner)
+                }
+                Button("Habit List", systemImage: "flame") {
+                    onAddList(.habits)
                 }
             }
             Button(
@@ -619,13 +659,17 @@ struct SidebarFooterLayout: Layout, Animatable {
 
 struct SidebarOptionsButton: View {
     @Binding var isPresented: Bool
+    let onResetAllData: () -> Void
 
     var body: some View {
         CompactIconButton(symbol: "gearshape", help: "Options") {
             isPresented.toggle()
         }
         .popover(isPresented: $isPresented, arrowEdge: .leading) {
-            OptionsPopover()
+            OptionsPopover {
+                isPresented = false
+                onResetAllData()
+            }
         }
     }
 }
@@ -635,8 +679,10 @@ struct OptionsPopover: View {
     @State private var launchesAtLogin: Bool
     @State private var requiresApproval = false
     @State private var errorMessage: String?
+    let onResetAllData: () -> Void
 
-    init() {
+    init(onResetAllData: @escaping () -> Void) {
+        self.onResetAllData = onResetAllData
         #if os(macOS)
         let status = SMAppService.mainApp.status
         _launchesAtLogin = State(
@@ -663,6 +709,11 @@ struct OptionsPopover: View {
             Toggle("Confirm before deleting", isOn: $confirmBeforeDeleting)
                 .toggleStyle(.switch)
                 .controlSize(.small)
+
+            Divider()
+
+            Button("Reset all lists…", role: .destructive, action: onResetAllData)
+                .font(.system(size: 10, weight: .medium))
 
             if requiresApproval {
                 VStack(alignment: .leading, spacing: 7) {
@@ -832,6 +883,11 @@ struct TaskListView: View {
                                 requestDeletion(for: [item])
                             }
                         }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button("Delete", role: .destructive) {
+                                requestDeletion(for: [item])
+                            }
+                        }
                     }
                     .reorderable()
                     .onDelete { offsets in
@@ -879,8 +935,8 @@ struct TaskListView: View {
                 title: isMultiple ? "Delete tasks" : "Delete task",
                 name: isMultiple ? "\(items.count) selected tasks" : displayName(for: items[0]),
                 detail: isMultiple
-                    ? "Type “delete” below to permanently remove these tasks. Press ESC to cancel this process."
-                    : "Type “delete” below to permanently remove this task. Press ESC to cancel this process."
+                    ? "Click Delete three times to permanently remove these tasks. Press ESC to cancel."
+                    : "Click Delete three times to permanently remove this task. Press ESC to cancel."
             )
         )
     }
@@ -1107,6 +1163,104 @@ struct CompactIconButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .help(help)
+    }
+}
+
+struct TripleDeleteConfirmationView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var clickCount = 0
+    @State private var isBursting = false
+
+    let title: String
+    let name: String
+    let detail: String
+    let onCancel: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 9) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(clickCount == 0 ? Color.secondary : Color.red)
+                        .frame(width: 22, height: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title).font(.headline)
+                        Text(name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+
+                Divider()
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    HStack(spacing: 3) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Capsule()
+                                .fill(index < clickCount ? Color.red : Color.secondary.opacity(0.18))
+                                .frame(width: 18, height: 3)
+                        }
+                    }
+                    Spacer()
+                    Button("Cancel", role: .cancel, action: onCancel)
+                    Button(deleteButtonTitle, role: .destructive, action: registerDeleteClick)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(14)
+            .frame(width: 336)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.red.opacity(0.1 + Double(clickCount) * 0.13))
+            }
+            .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
+            .scaleEffect(isBursting ? 1.08 : 1)
+            .opacity(isBursting ? 0 : 1)
+            .blur(radius: isBursting ? 4 : 0)
+            .keyframeAnimator(initialValue: CGFloat.zero, trigger: clickCount) { content, offset in
+                content.offset(x: offset)
+            } keyframes: { _ in
+                let amount = CGFloat(clickCount) * 2.5
+                LinearKeyframe(-amount, duration: 0.035)
+                LinearKeyframe(amount, duration: 0.05)
+                LinearKeyframe(-amount * 0.5, duration: 0.04)
+                LinearKeyframe(0, duration: 0.035)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onExitCommand(perform: onCancel)
+    }
+
+    private var deleteButtonTitle: String {
+        clickCount == 0 ? "Delete · 1 of 3" : "Delete · \(clickCount + 1) of 3"
+    }
+
+    private func registerDeleteClick() {
+        guard !isBursting else { return }
+        clickCount += 1
+        guard clickCount >= 3 else { return }
+        if reduceMotion {
+            onDelete()
+            return
+        }
+        withAnimation(.easeOut(duration: 0.05)) { isBursting = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(35))
+            onDelete()
+        }
     }
 }
 
@@ -1433,6 +1587,9 @@ struct ListEditor: View {
         case .recurring: ("Recurring", "repeat", .mint)
         case .assignments: ("Assignments", "graduationcap", .blue)
         case .collegeAdmissions: ("College Admissions", "building.columns", .pink)
+        case .packing: ("Packing", "suitcase", .orange)
+        case .mealPlanner: ("Meal Planner", "fork.knife", .mint)
+        case .habits: ("Habits", "flame", .pink)
         }
     }
 }
