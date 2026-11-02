@@ -29,5 +29,10 @@ To install and run this app, you have to be running **macOS 27.0 Golden Gate** o
 
 + Not any at this moment
 
+## Images
 
-Listen to ILLIT's new song "[You're Under Arrest](https://youtu.be/V2V9-9VhYJo?si=Wsj4fqh3zqzBGLmU)" <3
+Full Sidebar            |  Compact Sidebar
+:-------------------------:|:-------------------------:
+<img width="574" height="900" alt="Screenshot 2026-10-29 at 13 24 43" src="https://github.com/user-attachments/assets/6f155459-2bdb-4ec9-9ce3-a74776a7113c" /> |   <img width="459" height="900" alt="Screenshot 2026-10-29 at 13 25 02" src="https://github.com/user-attachments/assets/8db3e0ca-f3a6-4326-a13f-b53ca7423f3a" />
+
+
