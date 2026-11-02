@@ -2,11 +2,22 @@ import Foundation
 import Observation
 import SwiftUI
 
+enum TodoListKind: String, Codable, CaseIterable {
+    case standard
+    case shopping
+    case recurring
+    case assignments
+    case collegeAdmissions
+}
+
 struct TodoList: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
     var symbol: String
     var color: ListColor
+    var kind: TodoListKind? = nil
+
+    var listKind: TodoListKind { kind ?? .standard }
 }
 
 struct TodoItem: Identifiable, Codable, Equatable {
@@ -194,6 +205,10 @@ struct TodoSnapshot: Codable {
     var items: [TodoItem]
     var sidebarEntries: [SidebarEntry]?
     var taskSortModes: [UUID: TaskSortMode]?
+    var shoppingItems: [ShoppingItem]?
+    var recurringItems: [RecurringItem]?
+    var assignments: [AssignmentItem]?
+    var collegeApplications: [CollegeApplication]?
 }
 
 @MainActor
@@ -206,6 +221,10 @@ final class TodoStore {
     var selectedItemID: UUID?
     var presentedReminderID: UUID?
     var taskSortModes: [UUID: TaskSortMode] = [:]
+    var shoppingItems: [ShoppingItem] = []
+    var recurringItems: [RecurringItem] = []
+    var assignments: [AssignmentItem] = []
+    var collegeApplications: [CollegeApplication] = []
 
     private let storageKey = "focus.todo.snapshot.v1"
 
@@ -264,8 +283,13 @@ final class TodoStore {
         items.filter { !$0.isCompleted }.count
     }
 
-    func addList(name: String, symbol: String, color: ListColor) {
-        let list = TodoList(id: UUID(), name: name, symbol: symbol, color: color)
+    func addList(
+        name: String,
+        symbol: String,
+        color: ListColor,
+        kind: TodoListKind = .standard
+    ) {
+        let list = TodoList(id: UUID(), name: name, symbol: symbol, color: color, kind: kind)
         lists.append(list)
         sidebarEntries.append(
             SidebarEntry(id: UUID(), kind: .list(list.id))
@@ -288,6 +312,11 @@ final class TodoStore {
     func deleteList(_ id: TodoList.ID) {
         guard lists.contains(where: { $0.id == id }), lists.count > 1 else { return }
         items.removeAll { $0.listID == id }
+        shoppingItems.removeAll { $0.listID == id }
+        recurringItems.removeAll { $0.listID == id }
+        assignments.removeAll { $0.listID == id }
+        collegeApplications.removeAll { $0.listID == id }
+        taskSortModes[id] = nil
         lists.removeAll { $0.id == id }
         sidebarEntries.removeAll { entry in
             entry.kind == .list(id)
@@ -547,6 +576,10 @@ final class TodoStore {
             lists = snapshot.lists
             items = snapshot.items
             taskSortModes = snapshot.taskSortModes ?? [:]
+            shoppingItems = snapshot.shoppingItems ?? []
+            recurringItems = snapshot.recurringItems ?? []
+            assignments = snapshot.assignments ?? []
+            collegeApplications = snapshot.collegeApplications ?? []
             sidebarEntries = sanitizedSidebarEntries(
                 snapshot.sidebarEntries,
                 lists: lists
@@ -620,12 +653,16 @@ final class TodoStore {
         return entries
     }
 
-    private func save() {
+    func save() {
         let snapshot = TodoSnapshot(
             lists: lists,
             items: items,
             sidebarEntries: sidebarEntries,
-            taskSortModes: taskSortModes
+            taskSortModes: taskSortModes,
+            shoppingItems: shoppingItems,
+            recurringItems: recurringItems,
+            assignments: assignments,
+            collegeApplications: collegeApplications
         )
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)

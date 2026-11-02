@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var store = TodoStore()
     @State private var editingItem: TodoItem?
     @State private var isAddingList = false
+    @State private var newListKind: TodoListKind = .standard
     @State private var isEditingList = false
     @State private var isSidebarCompact = false
     @State private var pendingDeletion: PendingDeletion?
@@ -37,6 +38,7 @@ struct ContentView: View {
                 store: store,
                 editingItem: $editingItem,
                 isAddingList: $isAddingList,
+                newListKind: $newListKind,
                 isEditingList: $isEditingList,
                 isSidebarCompact: $isSidebarCompact,
                 onRequestDeletion: requestDeletion
@@ -83,13 +85,13 @@ struct ContentView: View {
         #endif
         .preferredColorScheme(.dark)
         .sheet(item: $editingItem) { item in
-            TaskEditor(item: item, lists: store.lists) { updated in
+            TaskEditor(item: item, lists: store.lists.filter { $0.listKind == .standard }) { updated in
                 store.updateItem(updated)
             }
         }
         .sheet(isPresented: $isAddingList) {
-            ListEditor(mode: .add) { name, symbol, color in
-                store.addList(name: name, symbol: symbol, color: color)
+            ListEditor(mode: .add, kind: newListKind) { name, symbol, color in
+                store.addList(name: name, symbol: symbol, color: color, kind: newListKind)
             }
         }
         .sheet(isPresented: $isEditingList) {
@@ -181,6 +183,7 @@ struct TodoWorkspace: View {
     let store: TodoStore
     @Binding var editingItem: TodoItem?
     @Binding var isAddingList: Bool
+    @Binding var newListKind: TodoListKind
     @Binding var isEditingList: Bool
     @Binding var isSidebarCompact: Bool
     let onRequestDeletion: (PendingDeletion) -> Void
@@ -190,6 +193,7 @@ struct TodoWorkspace: View {
             SidebarView(
                 store: store,
                 isAddingList: $isAddingList,
+                newListKind: $newListKind,
                 isEditingList: $isEditingList,
                 isCompact: $isSidebarCompact,
                 onRequestDeletion: onRequestDeletion
@@ -198,11 +202,15 @@ struct TodoWorkspace: View {
 
             Divider()
 
-            TaskListView(
-                store: store,
-                editingItem: $editingItem,
-                onRequestDeletion: onRequestDeletion
-            )
+            if let selectedList = store.selectedList, selectedList.listKind != .standard {
+                SpecialListDetailView(store: store, list: selectedList)
+            } else {
+                TaskListView(
+                    store: store,
+                    editingItem: $editingItem,
+                    onRequestDeletion: onRequestDeletion
+                )
+            }
         }
         .background(Color.clear)
         .animation(.easeInOut(duration: 0.30), value: isSidebarCompact)
@@ -212,6 +220,7 @@ struct TodoWorkspace: View {
 struct SidebarView: View {
     @Bindable var store: TodoStore
     @Binding var isAddingList: Bool
+    @Binding var newListKind: TodoListKind
     @Binding var isEditingList: Bool
     @Binding var isCompact: Bool
     let onRequestDeletion: (PendingDeletion) -> Void
@@ -257,7 +266,10 @@ struct SidebarView: View {
             SidebarFooter(
                 canDelete: store.lists.count > 1,
                 isCompact: isCompact,
-                onAddList: { isAddingList = true },
+                onAddList: { kind in
+                    newListKind = kind
+                    isAddingList = true
+                },
                 onAddDivider: store.addDivider,
                 onEdit: { isEditingList = true },
                 onDelete: requestSelectedListDeletion
@@ -301,9 +313,7 @@ struct SidebarEntryRow: View {
                         name: list.name,
                         symbol: list.symbol,
                         color: list.color.color,
-                        count: store.items.filter {
-                            $0.listID == list.id && !$0.isCompleted
-                        }.count,
+                        count: store.itemCount(in: list),
                         isSelected: store.selectedListID == list.id,
                         isCompact: isCompact
                     )
@@ -471,7 +481,7 @@ struct SidebarFooter: View {
 
     let canDelete: Bool
     let isCompact: Bool
-    let onAddList: () -> Void
+    let onAddList: (TodoListKind) -> Void
     let onAddDivider: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -498,12 +508,28 @@ struct SidebarFooter: View {
 }
 
 struct SidebarAddMenu: View {
-    let onAddList: () -> Void
+    let onAddList: (TodoListKind) -> Void
     let onAddDivider: () -> Void
 
     var body: some View {
         Menu {
-            Button("New List", systemImage: "plus", action: onAddList)
+            Button("New List", systemImage: "list.bullet") {
+                onAddList(.standard)
+            }
+            Menu("Special List", systemImage: "sparkles") {
+                Button("Shopping List", systemImage: "cart") {
+                    onAddList(.shopping)
+                }
+                Button("Recurring List", systemImage: "repeat") {
+                    onAddList(.recurring)
+                }
+                Button("Assignment Tracker", systemImage: "graduationcap") {
+                    onAddList(.assignments)
+                }
+                Button("College Admission Tracker", systemImage: "building.columns") {
+                    onAddList(.collegeAdmissions)
+                }
+            }
             Button(
                 "Add Divider",
                 systemImage: "rectangle.split.1x2",
@@ -1343,14 +1369,19 @@ struct ListEditor: View {
     let mode: ListEditorMode
     let onSave: (String, String, ListColor) -> Void
 
-    init(mode: ListEditorMode, onSave: @escaping (String, String, ListColor) -> Void) {
+    init(
+        mode: ListEditorMode,
+        kind: TodoListKind = .standard,
+        onSave: @escaping (String, String, ListColor) -> Void
+    ) {
         self.mode = mode
         self.onSave = onSave
         switch mode {
         case .add:
-            _name = State(initialValue: "")
-            _symbol = State(initialValue: "list.bullet")
-            _color = State(initialValue: .blue)
+            let preset = Self.preset(for: kind)
+            _name = State(initialValue: preset.name)
+            _symbol = State(initialValue: preset.symbol)
+            _color = State(initialValue: preset.color)
         case .edit(let list):
             _name = State(initialValue: list.name)
             _symbol = State(initialValue: list.symbol)
@@ -1390,6 +1421,18 @@ struct ListEditor: View {
         switch mode {
         case .add: "New list"
         case .edit: "Edit list"
+        }
+    }
+
+    private static func preset(
+        for kind: TodoListKind
+    ) -> (name: String, symbol: String, color: ListColor) {
+        switch kind {
+        case .standard: ("", "list.bullet", .blue)
+        case .shopping: ("Shopping", "cart", .orange)
+        case .recurring: ("Recurring", "repeat", .mint)
+        case .assignments: ("Assignments", "graduationcap", .blue)
+        case .collegeAdmissions: ("College Admissions", "building.columns", .pink)
         }
     }
 }
