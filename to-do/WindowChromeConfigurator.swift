@@ -5,21 +5,24 @@ import SwiftUI
 
 struct WindowChromeConfigurator: NSViewRepresentable {
     let isCompact: Bool
+    let isDesktopMode: Bool
 
     func makeNSView(context: Context) -> WindowChromeView {
         let view = WindowChromeView()
-        view.updateCompactMode(isCompact)
+        view.updateConfiguration(isCompact: isCompact, isDesktopMode: isDesktopMode)
         return view
     }
 
     func updateNSView(_ nsView: WindowChromeView, context: Context) {
-        nsView.updateCompactMode(isCompact)
+        nsView.updateConfiguration(isCompact: isCompact, isDesktopMode: isDesktopMode)
     }
 }
 
 final class WindowChromeView: NSView {
     private var desiredCompactMode = false
+    private var desiredDesktopMode = false
     private var appliedCompactMode: Bool?
+    private var appliedDesktopMode: Bool?
     private weak var configuredWindow: NSWindow?
 
     override func viewDidMoveToWindow() {
@@ -31,8 +34,9 @@ final class WindowChromeView: NSView {
         }
     }
 
-    func updateCompactMode(_ isCompact: Bool) {
+    func updateConfiguration(isCompact: Bool, isDesktopMode: Bool) {
         desiredCompactMode = isCompact
+        desiredDesktopMode = isDesktopMode
         applyWindowConfiguration()
     }
 
@@ -41,6 +45,7 @@ final class WindowChromeView: NSView {
         configureTransparentWindow(window)
         hideNativeWindowButtons(in: window)
         removeUnusedMainMenus()
+        applyDesktopMode(to: window)
 
         guard let appliedCompactMode else {
             self.appliedCompactMode = desiredCompactMode
@@ -95,6 +100,24 @@ final class WindowChromeView: NSView {
             window.contentMinSize = self.desiredCompactMode
                 ? compactMinimumSize
                 : expandedMinimumSize
+        }
+    }
+
+    private func applyDesktopMode(to window: NSWindow) {
+        guard appliedDesktopMode != desiredDesktopMode else { return }
+        appliedDesktopMode = desiredDesktopMode
+
+        if desiredDesktopMode {
+            // Stay above Finder's desktop surface so the window remains interactive,
+            // while remaining far below every normal application window.
+            let desktopLevel = Int(CGWindowLevelForKey(.desktopIconWindow)) + 1
+            window.level = NSWindow.Level(rawValue: desktopLevel)
+            window.collectionBehavior.formUnion([.canJoinAllSpaces, .stationary, .ignoresCycle])
+            window.hasShadow = false
+        } else {
+            window.level = .normal
+            window.collectionBehavior.subtract([.canJoinAllSpaces, .stationary, .ignoresCycle])
+            window.hasShadow = true
         }
     }
 

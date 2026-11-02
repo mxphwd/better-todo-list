@@ -32,6 +32,8 @@ struct ContentView: View {
     let appState: AppNavigationState
 
     @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
+    @AppStorage("appearanceMode") private var appearanceMode = "dark"
+    @AppStorage("desktopMode") private var desktopMode = false
     @State private var store = TodoStore()
     @State private var editingItem: TodoItem?
     @State private var isAddingList = false
@@ -106,9 +108,14 @@ struct ContentView: View {
         .frame(minWidth: 284, minHeight: 380)
         .ignoresSafeArea(.container, edges: .top)
         #if os(macOS)
-        .background(WindowChromeConfigurator(isCompact: isSidebarCompact))
+        .background(
+            WindowChromeConfigurator(
+                isCompact: isSidebarCompact,
+                isDesktopMode: desktopMode
+            )
+        )
         #endif
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(selectedColorScheme)
         .sheet(item: $editingItem) { item in
             TaskEditor(item: item, lists: store.lists.filter { $0.listKind.usesStandardTasks }) { updated in
                 store.updateItem(updated)
@@ -142,6 +149,17 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.22), value: appState.isShowingAbout)
         .animation(deletePromptAnimation, value: pendingDeletion?.id)
         .animation(deletePromptAnimation, value: isShowingResetConfirmation)
+    }
+
+    private var selectedColorScheme: ColorScheme? {
+        switch appearanceMode {
+        case "light":
+            .light
+        case "dark":
+            .dark
+        default:
+            nil
+        }
     }
 
     private var deletePromptTransition: AnyTransition {
@@ -295,6 +313,7 @@ struct SidebarAnimatedContainerModifier: AnimatableModifier {
 }
 
 struct SidebarView: View {
+    @AppStorage("desktopMode") private var desktopMode = false
     @Bindable var store: TodoStore
     @Binding var isAddingList: Bool
     @Binding var newListKind: TodoListKind
@@ -305,7 +324,9 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarWindowControls(isCompact: isCompact)
+            if !desktopMode {
+                SidebarWindowControls(isCompact: isCompact)
+            }
 
             SidebarHeader(
                 isCompact: isCompact,
@@ -557,7 +578,7 @@ struct SidebarRow: View {
         .padding(.horizontal, isCompact ? 0 : 8)
         .frame(height: 30)
         .background(
-            isSelected && !isCompact ? Color.white.opacity(0.075) : Color.clear,
+            isSelected && !isCompact ? Color.primary.opacity(0.075) : Color.clear,
             in: RoundedRectangle(cornerRadius: 6, style: .continuous)
         )
         .contentShape(Rectangle())
@@ -739,6 +760,8 @@ struct SidebarOptionsButton: View {
 struct OptionsPopover: View {
     @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
     @AppStorage("glassOpacity") private var glassOpacity = 0.82
+    @AppStorage("appearanceMode") private var appearanceMode = "dark"
+    @AppStorage("desktopMode") private var desktopMode = false
     @State private var launchesAtLogin: Bool
     @State private var requiresApproval = false
     @State private var errorMessage: String?
@@ -761,6 +784,8 @@ struct OptionsPopover: View {
         VStack(alignment: .leading, spacing: 14) {
             header
 
+            AppearanceToggle(selection: $appearanceMode)
+
             VStack(spacing: 0) {
                 OptionToggleCard(
                     title: "Open at login",
@@ -777,16 +802,27 @@ struct OptionsPopover: View {
                     .opacity(0.35)
 
                 OptionToggleCard(
+                    title: "Desktop mode",
+                    detail: "Keep to-do behind your other windows.",
+                    symbol: "desktopcomputer",
+                    isOn: $desktopMode
+                )
+
+                Divider()
+                    .padding(.leading, 42)
+                    .opacity(0.35)
+
+                OptionToggleCard(
                     title: "Confirm deletions",
                     detail: "Ask before removing anything.",
                     symbol: "checkmark.shield",
                     isOn: $confirmBeforeDeleting
                 )
             }
-            .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 9))
+            .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 9))
             .overlay {
                 RoundedRectangle(cornerRadius: 9)
-                    .stroke(.white.opacity(0.065), lineWidth: 1)
+                    .stroke(.primary.opacity(0.065), lineWidth: 1)
             }
 
             Divider()
@@ -902,7 +938,7 @@ struct OptionsPopover: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var resetButton: some View {
@@ -948,6 +984,53 @@ struct OptionsPopover: View {
     }
 }
 
+struct AppearanceToggle: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            appearanceButton(title: "System", symbol: "circle.lefthalf.filled", value: "system")
+            appearanceButton(title: "Dark", symbol: "moon.fill", value: "dark")
+            appearanceButton(title: "Light", symbol: "sun.max.fill", value: "light")
+        }
+        .padding(3)
+        .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(.primary.opacity(0.07), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Appearance")
+    }
+
+    private func appearanceButton(
+        title: LocalizedStringKey,
+        symbol: String,
+        value: String
+    ) -> some View {
+        let isSelected = selection == value
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selection = value
+            }
+        } label: {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isSelected ? .primary : .tertiary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+                .background(
+                    isSelected ? Color.primary.opacity(0.09) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 7)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 struct OptionToggleCard: View {
     let title: LocalizedStringKey
     let detail: LocalizedStringKey
@@ -978,11 +1061,11 @@ struct OptionToggleCard: View {
 
                 ZStack {
                     Capsule()
-                        .fill(isOn ? Color.white.opacity(0.42) : Color.white.opacity(0.10))
+                        .fill(isOn ? Color.primary.opacity(0.42) : Color.primary.opacity(0.10))
                         .frame(width: 34, height: 19)
 
                     Circle()
-                        .fill(isOn ? Color.white : Color.white.opacity(0.62))
+                        .fill(isOn ? Color.primary : Color.primary.opacity(0.62))
                         .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
                         .frame(width: 15, height: 15)
                         .offset(x: isOn ? 7.5 : -7.5)
@@ -1000,7 +1083,7 @@ struct OptionToggleCard: View {
 struct QuietOptionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? Color.white.opacity(0.035) : Color.clear)
+            .background(configuration.isPressed ? Color.primary.opacity(0.035) : Color.clear)
             .opacity(configuration.isPressed ? 0.82 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
@@ -1024,7 +1107,7 @@ struct GlassOpacitySlider: View {
                     ForEach(0..<dotCount, id: \.self) { index in
                         let dotProgress = Double(index) / Double(dotCount - 1)
                         Circle()
-                            .fill(Color.white.opacity(0.12 + (dotProgress * 0.68)))
+                            .fill(Color.primary.opacity(0.12 + (dotProgress * 0.68)))
                             .frame(
                                 width: 3 + (dotProgress * 2.5),
                                 height: 3 + (dotProgress * 2.5)
@@ -1039,12 +1122,12 @@ struct GlassOpacitySlider: View {
                     .frame(width: knobSize, height: knobSize)
                     .overlay {
                         Circle()
-                            .stroke(.white.opacity(0.42), lineWidth: 1)
+                            .stroke(.primary.opacity(0.42), lineWidth: 1)
                     }
                     .shadow(color: .black.opacity(0.28), radius: 4, y: 2)
                     .overlay {
                         Circle()
-                            .fill(.white.opacity(0.72))
+                            .fill(.primary.opacity(0.72))
                             .frame(width: 5, height: 5)
                     }
                     .position(x: knobX, y: proxy.size.height / 2)
@@ -1999,16 +2082,16 @@ struct ListIconPicker: View {
                             .frame(height: 28)
                             .background(
                                 selection == symbol
-                                    ? Color.white.opacity(0.14)
-                                    : Color.white.opacity(0.035),
+                                    ? Color.primary.opacity(0.14)
+                                    : Color.primary.opacity(0.035),
                                 in: RoundedRectangle(cornerRadius: 5, style: .continuous)
                             )
                             .overlay {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                                     .stroke(
                                         selection == symbol
-                                            ? Color.white.opacity(0.34)
-                                            : Color.white.opacity(0.07),
+                                            ? Color.primary.opacity(0.34)
+                                            : Color.primary.opacity(0.07),
                                         lineWidth: 1
                                     )
                             }
@@ -2050,8 +2133,8 @@ struct ListColorPalette: View {
                                         RoundedRectangle(cornerRadius: 4, style: .continuous)
                                             .stroke(
                                                 selection == option
-                                                    ? Color.white
-                                                    : Color.white.opacity(0.10),
+                                                    ? Color.primary
+                                                    : Color.primary.opacity(0.10),
                                                 lineWidth: selection == option ? 2 : 1
                                             )
                                     }
