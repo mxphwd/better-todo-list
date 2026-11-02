@@ -27,6 +27,8 @@ struct PendingDeletion: Identifiable {
 }
 
 struct ContentView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let appState: AppNavigationState
 
     @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
@@ -82,7 +84,7 @@ struct ContentView: View {
                     onCancel: { self.pendingDeletion = nil },
                     onDelete: { performDeletion(pendingDeletion) }
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .transition(deletePromptTransition)
                 .zIndex(20)
             }
 
@@ -97,7 +99,7 @@ struct ContentView: View {
                         isShowingResetConfirmation = false
                     }
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .transition(deletePromptTransition)
                 .zIndex(30)
             }
         }
@@ -138,7 +140,27 @@ struct ContentView: View {
         .modifier(ListMenuSyncModifier(appState: appState, store: store))
         .animation(.easeInOut(duration: 0.22), value: store.presentedReminderID)
         .animation(.easeInOut(duration: 0.22), value: appState.isShowingAbout)
-        .animation(.easeOut(duration: 0.14), value: pendingDeletion?.id)
+        .animation(deletePromptAnimation, value: pendingDeletion?.id)
+        .animation(deletePromptAnimation, value: isShowingResetConfirmation)
+    }
+
+    private var deletePromptTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+
+        return .asymmetric(
+            insertion: .opacity
+                .combined(with: .scale(scale: 0.99))
+                .combined(with: .offset(y: 5)),
+            removal: .opacity
+                .combined(with: .scale(scale: 0.995))
+                .combined(with: .offset(y: 2))
+        )
+    }
+
+    private var deletePromptAnimation: Animation {
+        reduceMotion
+            ? .linear(duration: 0.1)
+            : .easeOut(duration: 0.16)
     }
 
     private func requestDeletion(_ deletion: PendingDeletion) {
@@ -1478,18 +1500,40 @@ struct TripleDeleteConfirmationView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack {
-                    HStack(spacing: 3) {
-                        ForEach(0..<3, id: \.self) { index in
-                            Capsule()
-                                .fill(index < clickCount ? Color.red : Color.secondary.opacity(0.18))
-                                .frame(width: 18, height: 3)
-                        }
+                Button(action: registerDeleteClick) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(deleteButtonTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                        Spacer()
+                        Text("⇧ click to delete now")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(buttonForeground.opacity(0.68))
                     }
+                    .foregroundStyle(buttonForeground)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+                    .background(buttonBackground, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(Color.red.opacity(0.24 + Double(clickCount) * 0.22))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.defaultAction)
+
+                HStack {
+                    Text("Press three times to confirm. ESC cancels.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Cancel", role: .cancel, action: onCancel)
-                    Button(deleteButtonTitle, role: .destructive, action: registerDeleteClick)
-                        .keyboardShortcut(.defaultAction)
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(14)
@@ -1518,12 +1562,34 @@ struct TripleDeleteConfirmationView: View {
     }
 
     private var deleteButtonTitle: String {
-        clickCount == 0 ? "Delete · 1 of 3" : "Delete · \(clickCount + 1) of 3"
+        clickCount == 0 ? "Delete · first press" : "Delete · \(clickCount + 1) of 3"
+    }
+
+    private var buttonBackground: Color {
+        switch clickCount {
+        case 0: Color.red.opacity(0.08)
+        case 1: Color.red.opacity(0.24)
+        default: Color.red.opacity(0.52)
+        }
+    }
+
+    private var buttonForeground: Color {
+        clickCount >= 2 ? .white : .red
     }
 
     private func registerDeleteClick() {
         guard !isBursting else { return }
-        clickCount += 1
+
+        #if os(macOS)
+        if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+            onDelete()
+            return
+        }
+        #endif
+
+        withAnimation(.easeOut(duration: 0.13)) {
+            clickCount += 1
+        }
         guard clickCount >= 3 else { return }
         if reduceMotion {
             onDelete()
