@@ -224,10 +224,7 @@ struct TodoWorkspace: View {
                 onResetAllData: onResetAllData
             )
             .modifier(
-                SidebarMaterialRevealModifier(compactProgress: isSidebarCompact ? 1 : 0)
-            )
-            .modifier(
-                SidebarWidthModifier(compactProgress: isSidebarCompact ? 1 : 0)
+                SidebarAnimatedContainerModifier(compactProgress: isSidebarCompact ? 1 : 0)
             )
 
             Divider()
@@ -243,11 +240,12 @@ struct TodoWorkspace: View {
             }
         }
         .background(Color.clear)
-        .animation(.sidebarTransition, value: isSidebarCompact)
     }
 }
 
-struct SidebarWidthModifier: AnimatableModifier {
+struct SidebarAnimatedContainerModifier: AnimatableModifier {
+    @AppStorage("glassOpacity") private var glassOpacity = 0.82
+
     var compactProgress: CGFloat
 
     var animatableData: CGFloat {
@@ -259,34 +257,18 @@ struct SidebarWidthModifier: AnimatableModifier {
         let expandedWidth: CGFloat = 160
         let compactWidth: CGFloat = 44
         let width = expandedWidth + (compactWidth - expandedWidth) * compactProgress
-        content.frame(width: width)
-    }
-}
 
-struct SidebarMaterialRevealModifier: AnimatableModifier {
-    var compactProgress: CGFloat
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(.thinMaterial)
+                .opacity(glassOpacity)
+                .frame(width: expandedWidth)
 
-    var animatableData: CGFloat {
-        get { compactProgress }
-        set { compactProgress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        let expandedWidth: CGFloat = 160
-        let compactWidth: CGFloat = 44
-        let revealWidth = expandedWidth + (compactWidth - expandedWidth) * compactProgress
-
-        content
-            .background(alignment: .leading) {
-                Rectangle()
-                    .fill(.thinMaterial)
-                    .frame(width: expandedWidth)
-                    .mask(alignment: .leading) {
-                        Rectangle()
-                            .frame(width: revealWidth)
-                    }
-            }
-            .clipped()
+            content
+                .frame(width: width)
+        }
+        .frame(width: width, alignment: .leading)
+        .clipped(antialiased: false)
     }
 }
 
@@ -350,7 +332,6 @@ struct SidebarView: View {
                 onResetAllData: onResetAllData
             )
         }
-        .animation(.sidebarTransition, value: isCompact)
     }
 
     private func requestSelectedListDeletion() {
@@ -456,12 +437,13 @@ struct SidebarHeader: View {
     let onToggleCompact: () -> Void
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .leading) {
             HStack(spacing: 7) {
                 Text("to-do")
                     .font(.system(size: 15, weight: .semibold, design: .serif))
                     .italic()
                     .tracking(-0.35)
+                    .fixedSize()
 
                 Spacer()
 
@@ -470,18 +452,19 @@ struct SidebarHeader: View {
                     action: onToggleCompact
                 )
             }
+            .frame(width: 134)
             .opacity(isCompact ? 0 : 1)
-            .offset(x: isCompact ? -10 : 0)
+            .offset(x: isCompact ? 3 : 13)
             .allowsHitTesting(!isCompact)
 
             SidebarToggleButton(
                 isCompact: true,
                 action: onToggleCompact
             )
+            .frame(maxWidth: .infinity, alignment: .center)
             .opacity(isCompact ? 1 : 0)
             .allowsHitTesting(isCompact)
         }
-        .padding(.horizontal, isCompact ? 0 : 13)
         .frame(height: 38)
         .overlay(alignment: .bottom) {
             Divider().opacity(0.28)
@@ -588,7 +571,6 @@ struct SidebarFooter: View {
         .padding(.horizontal, isCompact ? 0 : 8)
         .frame(maxWidth: .infinity)
         .frame(height: isCompact ? 118 : 38)
-        .animation(.sidebarTransition, value: isCompact)
         .overlay(alignment: .top) {
             Divider().opacity(0.28)
         }
@@ -734,6 +716,7 @@ struct SidebarOptionsButton: View {
 
 struct OptionsPopover: View {
     @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
+    @AppStorage("glassOpacity") private var glassOpacity = 0.82
     @State private var launchesAtLogin: Bool
     @State private var requiresApproval = false
     @State private var errorMessage: String?
@@ -753,51 +736,150 @@ struct OptionsPopover: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Options")
-                .font(.system(size: 13, weight: .semibold))
+        VStack(alignment: .leading, spacing: 14) {
+            header
 
-            Toggle("Open at login", isOn: $launchesAtLogin)
-                .toggleStyle(.switch)
-                .controlSize(.small)
+            VStack(spacing: 0) {
+                OptionToggleCard(
+                    title: "Open at login",
+                    detail: "Start to-do when you sign in.",
+                    symbol: "power",
+                    isOn: $launchesAtLogin
+                )
                 .onChange(of: launchesAtLogin) { _, isEnabled in
                     updateLaunchAtLogin(isEnabled)
                 }
 
-            Toggle("Confirm before deleting", isOn: $confirmBeforeDeleting)
-                .toggleStyle(.switch)
-                .controlSize(.small)
+                Divider()
+                    .padding(.leading, 42)
+                    .opacity(0.35)
+
+                OptionToggleCard(
+                    title: "Confirm deletions",
+                    detail: "Ask before removing anything.",
+                    symbol: "checkmark.shield",
+                    isOn: $confirmBeforeDeleting
+                )
+            }
+            .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 9))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(.white.opacity(0.065), lineWidth: 1)
+            }
 
             Divider()
+                .opacity(0.35)
 
-            Button("Reset all lists…", role: .destructive, action: onResetAllData)
-                .font(.system(size: 10, weight: .medium))
+            glassControl
 
             if requiresApproval {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Approval is required in System Settings before the app can open at login.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-
-                    Button("Open Login Items Settings") {
-                        #if os(macOS)
-                        SMAppService.openSystemSettingsLoginItems()
-                        #endif
-                    }
-                    .font(.system(size: 10, weight: .medium))
-                }
+                approvalNotice
+                    .transition(.opacity)
             }
 
             if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.red)
+                Label(errorMessage, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
             }
+
+            Divider()
+                .opacity(0.35)
+
+            resetButton
         }
         .padding(16)
-        .frame(width: 280)
+        .frame(width: 330)
         .background(.thinMaterial)
+        .animation(.easeInOut(duration: 0.2), value: requiresApproval)
+        .animation(.easeOut(duration: 0.18), value: errorMessage)
+    }
+
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Options")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("to-do preferences")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Image(systemName: "gearshape")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var glassControl: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Glass opacity")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Adjust the workspace background.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text(glassOpacity, format: .percent.precision(.fractionLength(0)))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .foregroundStyle(.secondary)
+            }
+
+            GlassOpacitySlider(value: $glassOpacity)
+
+            HStack {
+                Text("Clear")
+                Spacer()
+                Text("Frosted")
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var approvalNotice: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Allow this app in Login Items to finish setup.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Open Login Items Settings") {
+                #if os(macOS)
+                SMAppService.openSystemSettingsLoginItems()
+                #endif
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var resetButton: some View {
+        Button(role: .destructive, action: onResetAllData) {
+            HStack {
+                Image(systemName: "arrow.counterclockwise")
+                    .frame(width: 22)
+                Text("Reset all lists…")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.red.opacity(0.85))
+        .padding(.horizontal, 2)
     }
 
     private func updateLaunchAtLogin(_ isEnabled: Bool) {
@@ -824,6 +906,135 @@ struct OptionsPopover: View {
             errorMessage = error.localizedDescription
         }
         #endif
+    }
+}
+
+struct OptionToggleCard: View {
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+    let symbol: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isOn.toggle()
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isOn ? .primary : .tertiary)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                ZStack {
+                    Capsule()
+                        .fill(isOn ? Color.white.opacity(0.42) : Color.white.opacity(0.10))
+                        .frame(width: 34, height: 19)
+
+                    Circle()
+                        .fill(isOn ? Color.white : Color.white.opacity(0.62))
+                        .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
+                        .frame(width: 15, height: 15)
+                        .offset(x: isOn ? 7.5 : -7.5)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(QuietOptionButtonStyle())
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+}
+
+struct QuietOptionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Color.white.opacity(0.035) : Color.clear)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct GlassOpacitySlider: View {
+    @Binding var value: Double
+
+    private let range = 0.2...1.0
+    private let dotCount = 9
+    private let knobSize: CGFloat = 24
+
+    var body: some View {
+        GeometryReader { proxy in
+            let availableWidth = max(proxy.size.width - knobSize, 1)
+            let progress = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+            let knobX = (knobSize / 2) + (availableWidth * progress)
+
+            ZStack(alignment: .leading) {
+                HStack(spacing: 0) {
+                    ForEach(0..<dotCount, id: \.self) { index in
+                        let dotProgress = Double(index) / Double(dotCount - 1)
+                        Circle()
+                            .fill(Color.white.opacity(0.12 + (dotProgress * 0.68)))
+                            .frame(
+                                width: 3 + (dotProgress * 2.5),
+                                height: 3 + (dotProgress * 2.5)
+                            )
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, knobSize / 2)
+
+                Circle()
+                    .fill(.regularMaterial)
+                    .frame(width: knobSize, height: knobSize)
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.42), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.28), radius: 4, y: 2)
+                    .overlay {
+                        Circle()
+                            .fill(.white.opacity(0.72))
+                            .frame(width: 5, height: 5)
+                    }
+                    .position(x: knobX, y: proxy.size.height / 2)
+                    .animation(.easeOut(duration: 0.12), value: value)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        let location = min(max(gesture.location.x - knobSize / 2, 0), availableWidth)
+                        value = range.lowerBound
+                            + (location / availableWidth) * (range.upperBound - range.lowerBound)
+                    }
+            )
+        }
+        .frame(height: 36)
+        .accessibilityElement()
+        .accessibilityLabel("Glass opacity")
+        .accessibilityValue(Text(value, format: .percent.precision(.fractionLength(0))))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                value = min(value + 0.05, range.upperBound)
+            case .decrement:
+                value = max(value - 0.05, range.lowerBound)
+            @unknown default:
+                break
+            }
+        }
     }
 }
 
@@ -858,7 +1069,6 @@ struct SidebarWindowControls: View {
         )
         .padding(.leading, isCompact ? 0 : 13)
         .frame(height: isCompact ? 70 : 32)
-        .animation(.sidebarTransition, value: isCompact)
     }
 }
 
@@ -901,6 +1111,7 @@ struct WindowActionButton: View {
 }
 
 struct TaskListView: View {
+    @AppStorage("glassOpacity") private var glassOpacity = 0.82
     @Bindable var store: TodoStore
     @Binding var editingItem: TodoItem?
     let onRequestDeletion: (PendingDeletion) -> Void
@@ -976,7 +1187,11 @@ struct TaskListView: View {
                 }
             )
         }
-        .background(.ultraThinMaterial)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(glassOpacity)
+        }
     }
 
     private func addItem() {
