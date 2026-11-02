@@ -5,6 +5,12 @@ import AppKit
 import ServiceManagement
 #endif
 
+extension Animation {
+    static var sidebarTransition: Animation {
+        .timingCurve(0.42, 0, 0.58, 1, duration: 0.34)
+    }
+}
+
 enum DeletionKind {
     case task
     case list
@@ -217,7 +223,12 @@ struct TodoWorkspace: View {
                 onRequestDeletion: onRequestDeletion,
                 onResetAllData: onResetAllData
             )
-            .frame(width: isSidebarCompact ? 44 : 160)
+            .modifier(
+                SidebarMaterialRevealModifier(compactProgress: isSidebarCompact ? 1 : 0)
+            )
+            .modifier(
+                SidebarWidthModifier(compactProgress: isSidebarCompact ? 1 : 0)
+            )
 
             Divider()
 
@@ -232,7 +243,50 @@ struct TodoWorkspace: View {
             }
         }
         .background(Color.clear)
-        .animation(.easeInOut(duration: 0.30), value: isSidebarCompact)
+        .animation(.sidebarTransition, value: isSidebarCompact)
+    }
+}
+
+struct SidebarWidthModifier: AnimatableModifier {
+    var compactProgress: CGFloat
+
+    var animatableData: CGFloat {
+        get { compactProgress }
+        set { compactProgress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let expandedWidth: CGFloat = 160
+        let compactWidth: CGFloat = 44
+        let width = expandedWidth + (compactWidth - expandedWidth) * compactProgress
+        content.frame(width: width)
+    }
+}
+
+struct SidebarMaterialRevealModifier: AnimatableModifier {
+    var compactProgress: CGFloat
+
+    var animatableData: CGFloat {
+        get { compactProgress }
+        set { compactProgress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let expandedWidth: CGFloat = 160
+        let compactWidth: CGFloat = 44
+        let revealWidth = expandedWidth + (compactWidth - expandedWidth) * compactProgress
+
+        content
+            .background(alignment: .leading) {
+                Rectangle()
+                    .fill(.thinMaterial)
+                    .frame(width: expandedWidth)
+                    .mask(alignment: .leading) {
+                        Rectangle()
+                            .frame(width: revealWidth)
+                    }
+            }
+            .clipped()
     }
 }
 
@@ -252,7 +306,7 @@ struct SidebarView: View {
             SidebarHeader(
                 isCompact: isCompact,
                 onToggleCompact: {
-                    withAnimation(.easeInOut(duration: 0.30)) {
+                    withAnimation(.sidebarTransition) {
                         isCompact.toggle()
                     }
                 }
@@ -296,8 +350,7 @@ struct SidebarView: View {
                 onResetAllData: onResetAllData
             )
         }
-        .background(.thinMaterial)
-        .animation(.easeInOut(duration: 0.30), value: isCompact)
+        .animation(.sidebarTransition, value: isCompact)
     }
 
     private func requestSelectedListDeletion() {
@@ -418,6 +471,7 @@ struct SidebarHeader: View {
                 )
             }
             .opacity(isCompact ? 0 : 1)
+            .offset(x: isCompact ? -10 : 0)
             .allowsHitTesting(!isCompact)
 
             SidebarToggleButton(
@@ -480,6 +534,7 @@ struct SidebarRow: View {
                 }
             }
             .opacity(isCompact ? 0 : 1)
+            .offset(x: isCompact ? -10 : 0)
 
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
@@ -533,7 +588,7 @@ struct SidebarFooter: View {
         .padding(.horizontal, isCompact ? 0 : 8)
         .frame(maxWidth: .infinity)
         .frame(height: isCompact ? 118 : 38)
-        .animation(.easeInOut(duration: 0.30), value: isCompact)
+        .animation(.sidebarTransition, value: isCompact)
         .overlay(alignment: .top) {
             Divider().opacity(0.28)
         }
@@ -803,7 +858,7 @@ struct SidebarWindowControls: View {
         )
         .padding(.leading, isCompact ? 0 : 13)
         .frame(height: isCompact ? 70 : 32)
-        .animation(.easeInOut(duration: 0.30), value: isCompact)
+        .animation(.sidebarTransition, value: isCompact)
     }
 }
 

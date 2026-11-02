@@ -82,7 +82,7 @@ final class WindowChromeView: NSView {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.30
+            context.duration = 0.34
             context.timingFunction = CAMediaTimingFunction(
                 controlPoints: 0.42,
                 0,
