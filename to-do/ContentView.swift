@@ -850,11 +850,27 @@ struct OptionsPopover: View {
 
                 Spacer()
 
-                Text(glassOpacity, format: .percent.precision(.fractionLength(0)))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 9) {
+                    Text(glassOpacity, format: .percent.precision(.fractionLength(0)))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            glassOpacity = 0.82
+                        }
+                    } label: {
+                        Label("Default", systemImage: "arrow.counterclockwise")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+                    .disabled(abs(glassOpacity - 0.82) < 0.005)
+                    .opacity(abs(glassOpacity - 0.82) < 0.005 ? 0.35 : 1)
+                    .help("Restore default glass opacity")
+                }
             }
 
             GlassOpacitySlider(value: $glassOpacity)
@@ -864,8 +880,9 @@ struct OptionsPopover: View {
                 Spacer()
                 Text("Frosted")
             }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(.system(size: 9))
+            .foregroundStyle(.quaternary)
+            .offset(y: -3)
         }
     }
 
