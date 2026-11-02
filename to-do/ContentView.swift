@@ -258,39 +258,30 @@ struct SidebarView: View {
                 }
             )
 
-            List {
-                ForEach(store.sidebarEntries) { entry in
-                    SidebarEntryRow(
-                        entry: entry,
-                        store: store,
-                        isCompact: isCompact,
-                        onRequestDeletion: onRequestDeletion,
-                        onEditList: { listID in
-                            store.selectedListID = listID
-                            isEditingList = true
-                        }
-                    )
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 2,
-                            leading: isCompact ? 5 : 9,
-                            bottom: 2,
-                            trailing: isCompact ? 5 : 9
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(store.sidebarEntries) { entry in
+                        SidebarEntryRow(
+                            entry: entry,
+                            store: store,
+                            isCompact: isCompact,
+                            onRequestDeletion: onRequestDeletion,
+                            onEditList: { listID in
+                                store.selectedListID = listID
+                                isEditingList = true
+                            }
                         )
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    }
+                    .reorderable()
                 }
-                .reorderable()
-            }
-            .reorderContainer(for: SidebarEntry.self) { difference in
-                withAnimation(.easeInOut(duration: 0.20)) {
-                    store.applySidebarReorder(difference)
+                .reorderContainer(for: SidebarEntry.self) { difference in
+                    withAnimation(.easeInOut(duration: 0.20)) {
+                        store.applySidebarReorder(difference)
+                    }
                 }
+                .padding(.horizontal, isCompact ? 5 : 9)
+                .padding(.vertical, 8)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .contentMargins(.vertical, 6, for: .scrollContent)
 
             SidebarFooter(
                 canDelete: store.selectedList != nil,
@@ -362,6 +353,16 @@ struct SidebarEntryRow: View {
                         onRequestDeletion(SidebarView.deletion(for: list))
                     }
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 28)
+                        .onEnded { value in
+                            guard value.translation.width > 72,
+                                  abs(value.translation.width) > abs(value.translation.height) * 1.5 else {
+                                return
+                            }
+                            onRequestDeletion(SidebarView.deletion(for: list))
+                        }
+                )
             }
         case .divider:
             SidebarDividerRow(isCompact: isCompact)
@@ -386,9 +387,11 @@ struct SidebarDividerRow: View {
     let isCompact: Bool
 
     var body: some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.34))
-            .frame(height: 1)
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.34))
+                .frame(height: 1)
+        }
         .frame(height: 18)
         .contentShape(Rectangle())
         .help("Drag to reorder divider")
