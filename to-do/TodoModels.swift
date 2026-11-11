@@ -224,12 +224,20 @@ struct TodoSnapshot: Codable {
 @MainActor
 @Observable
 final class TodoStore {
+    private static let selectedListStorageKey = "focus.todo.selectedListID"
+    private static let selectedItemStorageKey = "focus.todo.selectedItemID"
+
     var lists: [TodoList] = []
     var items: [TodoItem] = []
     var sidebarEntries: [SidebarEntry] = []
-    var selectedListID: UUID?
-    var selectedItemID: UUID?
+    var selectedListID: UUID? {
+        didSet { persistSelection(selectedListID, key: Self.selectedListStorageKey) }
+    }
+    var selectedItemID: UUID? {
+        didSet { persistSelection(selectedItemID, key: Self.selectedItemStorageKey) }
+    }
     var presentedReminderID: UUID?
+    var reminderScheduleRevision = 0
     var taskSortModes: [UUID: TaskSortMode] = [:]
     var shoppingItems: [ShoppingItem] = []
     var recurringItems: [RecurringItem] = []
@@ -335,6 +343,7 @@ final class TodoStore {
             selectedListID = orderedLists.first?.id
         }
         selectedItemID = nil
+        reminderScheduleRevision += 1
         save()
     }
 
@@ -423,6 +432,7 @@ final class TodoStore {
         }
         reinsertItemAccordingToPreference(revised.id)
         selectedItemID = revised.id
+        reminderScheduleRevision += 1
         save()
     }
 
@@ -531,6 +541,7 @@ final class TodoStore {
         if items[index].isCompleted {
             items[index].reminderWasShown = true
         }
+        reminderScheduleRevision += 1
         save()
     }
 
@@ -539,7 +550,20 @@ final class TodoStore {
         if selectedItemID == id {
             selectedItemID = nil
         }
+        reminderScheduleRevision += 1
         save()
+    }
+
+    var nextPendingReminderDate: Date? {
+        items.lazy
+            .filter {
+                !$0.isCompleted &&
+                $0.hasSchedule &&
+                $0.hasFocusReminder &&
+                !$0.reminderWasShown
+            }
+            .map(\.dueDate)
+            .min()
     }
 
     func checkReminders(at date: Date = Date()) {
@@ -563,6 +587,7 @@ final class TodoStore {
             items[index].isCompleted = true
         }
         presentedReminderID = nil
+        reminderScheduleRevision += 1
         save()
     }
 
@@ -572,6 +597,7 @@ final class TodoStore {
         items[index].dueDate = Date().addingTimeInterval(TimeInterval(minutes * 60))
         items[index].reminderWasShown = false
         presentedReminderID = nil
+        reminderScheduleRevision += 1
         save()
     }
 
@@ -591,6 +617,7 @@ final class TodoStore {
         recurringItems = []
         assignments = []
         collegeApplications = []
+        reminderScheduleRevision += 1
         save()
     }
 
@@ -608,7 +635,15 @@ final class TodoStore {
                 snapshot.sidebarEntries,
                 lists: lists
             )
-            selectedListID = orderedLists.first?.id
+            let savedListID = savedSelection(forKey: Self.selectedListStorageKey)
+            selectedListID = savedListID.flatMap { savedID in
+                lists.contains(where: { $0.id == savedID }) ? savedID : nil
+            } ?? orderedLists.first?.id
+
+            let savedItemID = savedSelection(forKey: Self.selectedItemStorageKey)
+            selectedItemID = savedItemID.flatMap { savedID in
+                items.contains(where: { $0.id == savedID }) ? savedID : nil
+            }
             return
         }
 
@@ -690,5 +725,17 @@ final class TodoStore {
         )
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private func persistSelection(_ id: UUID?, key: String) {
+        if let id {
+            UserDefaults.standard.set(id.uuidString, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private func savedSelection(forKey key: String) -> UUID? {
+        UserDefaults.standard.string(forKey: key).flatMap(UUID.init(uuidString:))
     }
 }

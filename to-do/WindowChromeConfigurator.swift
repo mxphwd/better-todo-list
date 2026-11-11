@@ -110,11 +110,11 @@ final class WindowChromeView: NSView {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.34
+            context.duration = 0.38
             context.timingFunction = CAMediaTimingFunction(
-                controlPoints: 0.42,
-                0,
-                0.58,
+                controlPoints: 0.22,
+                0.78,
+                0.28,
                 1
             )
             context.allowsImplicitAnimation = true

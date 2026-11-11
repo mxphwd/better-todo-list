@@ -7,7 +7,7 @@ import ServiceManagement
 
 extension Animation {
     static var sidebarTransition: Animation {
-        .timingCurve(0.42, 0, 0.58, 1, duration: 0.34)
+        .timingCurve(0.22, 0.78, 0.28, 1, duration: 0.38)
     }
 }
 
@@ -28,6 +28,7 @@ struct PendingDeletion: Identifiable {
 
 struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     let appState: AppNavigationState
 
@@ -41,9 +42,16 @@ struct ContentView: View {
     @State private var isAddingList = false
     @State private var newListKind: TodoListKind = .standard
     @State private var isEditingList = false
-    @State private var isSidebarCompact = false
+    @State private var isSidebarCompact: Bool
     @State private var pendingDeletion: PendingDeletion?
     @State private var isShowingResetConfirmation = false
+
+    init(appState: AppNavigationState) {
+        self.appState = appState
+        _isSidebarCompact = State(
+            initialValue: UserDefaults.standard.bool(forKey: "isSidebarCompact")
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -141,12 +149,19 @@ struct ContentView: View {
                 }
             }
         }
-        .task {
-            store.checkReminders()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
-                store.checkReminders()
+        .task(id: ReminderMonitorID(
+            isActive: scenePhase == .active,
+            scheduleRevision: store.reminderScheduleRevision
+        )) {
+            await monitorReminders()
+        }
+        .task(id: isSidebarCompact) {
+            do {
+                try await Task.sleep(for: .milliseconds(450))
+            } catch {
+                return
             }
+            UserDefaults.standard.set(isSidebarCompact, forKey: "isSidebarCompact")
         }
         .modifier(ListMenuSyncModifier(appState: appState, store: store))
         .animation(.easeInOut(duration: 0.22), value: store.presentedReminderID)
@@ -163,6 +178,30 @@ struct ContentView: View {
             .dark
         default:
             nil
+        }
+    }
+
+    private func monitorReminders() async {
+        guard scenePhase == .active else { return }
+
+        store.checkReminders()
+
+        while !Task.isCancelled, let nextDate = store.nextPendingReminderDate {
+            let delay = max(nextDate.timeIntervalSinceNow, 0)
+            if delay > 0 {
+                let tolerance = min(max(delay * 0.1, 1), 60)
+                do {
+                    try await Task.sleep(
+                        for: .seconds(delay),
+                        tolerance: .seconds(tolerance)
+                    )
+                } catch {
+                    return
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            store.checkReminders()
         }
     }
 
@@ -208,6 +247,11 @@ struct ContentView: View {
         }
         pendingDeletion = nil
     }
+}
+
+private struct ReminderMonitorID: Equatable {
+    let isActive: Bool
+    let scheduleRevision: Int
 }
 
 struct ListMenuSyncModifier: ViewModifier {
@@ -338,6 +382,18 @@ struct TodoWorkspace: View {
             }
         }
         .background(Color.clear)
+        .onAppear {
+            if desktopMode && desktopCalendarMode {
+                isSidebarCompact = true
+            }
+        }
+        .onChange(of: desktopCalendarMode) { _, isEnabled in
+            if isEnabled {
+                withAnimation(.sidebarTransition) {
+                    isSidebarCompact = true
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -356,14 +412,20 @@ struct TodoWorkspace: View {
 
 struct DesktopCalendarView: View {
     @AppStorage("glassOpacity") private var glassOpacity = 0.82
-    @State private var displayedMonth = Date()
+    @AppStorage("calendarDisplayedMonth") private var displayedMonthTimestamp = Date().timeIntervalSince1970
 
     let store: TodoStore
 
     private let calendar = Calendar.autoupdatingCurrent
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
 
+    private var displayedMonth: Date {
+        Date(timeIntervalSince1970: displayedMonthTimestamp)
+    }
+
     var body: some View {
+        let colorsByDay = taskColorsByDay
+
         GeometryReader { proxy in
             let dayHeight = max(22, (proxy.size.height - 55) / 5)
 
@@ -373,7 +435,11 @@ struct DesktopCalendarView: View {
 
                 LazyVGrid(columns: columns, spacing: 2) {
                     ForEach(monthDates, id: \.self) { date in
-                        calendarDay(date, height: dayHeight)
+                        calendarDay(
+                            date,
+                            height: dayHeight,
+                            colors: colorsByDay[calendar.startOfDay(for: date)] ?? []
+                        )
                     }
                 }
             }
@@ -400,7 +466,7 @@ struct DesktopCalendarView: View {
             Spacer()
 
             Button("Today") {
-                displayedMonth = Date()
+                displayedMonthTimestamp = Date().timeIntervalSince1970
             }
             .buttonStyle(.plain)
             .font(.system(size: 9, weight: .semibold, design: .rounded))
@@ -422,8 +488,11 @@ struct DesktopCalendarView: View {
         }
     }
 
-    private func calendarDay(_ date: Date, height: CGFloat) -> some View {
-        let colors = taskColors(on: date)
+    private func calendarDay(
+        _ date: Date,
+        height: CGFloat,
+        colors: [ListColor]
+    ) -> some View {
         let isToday = calendar.isDateInToday(date)
         let belongsToMonth = calendar.isDate(date, equalTo: displayedMonth, toGranularity: .month)
 
@@ -455,7 +524,7 @@ struct DesktopCalendarView: View {
     private func monthButton(symbol: String, offset: Int) -> some View {
         Button {
             if let month = calendar.date(byAdding: .month, value: offset, to: displayedMonth) {
-                displayedMonth = month
+                displayedMonthTimestamp = month.timeIntervalSince1970
             }
         } label: {
             Image(systemName: symbol)
@@ -484,22 +553,21 @@ struct DesktopCalendarView: View {
         return Array(symbols[firstIndex...]) + Array(symbols[..<firstIndex])
     }
 
-    private func taskColors(on date: Date) -> [ListColor] {
+    private var taskColorsByDay: [Date: [ListColor]] {
         let listColors = Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, $0.color) })
-        var seen = Set<ListColor>()
+        var result: [Date: [ListColor]] = [:]
 
-        return store.items.compactMap { item in
-            guard item.hasSchedule,
-                  !item.isCompleted,
-                  calendar.isDate(item.dueDate, inSameDayAs: date),
-                  let color = listColors[item.listID],
-                  seen.insert(color).inserted else {
-                return nil
+        for item in store.items where item.hasSchedule && !item.isCompleted {
+            guard let color = listColors[item.listID] else { continue }
+            let day = calendar.startOfDay(for: item.dueDate)
+            var colors = result[day, default: []]
+            if colors.count < 3 && !colors.contains(color) {
+                colors.append(color)
+                result[day] = colors
             }
-            return color
         }
-        .prefix(3)
-        .map { $0 }
+
+        return result
     }
 }
 
@@ -1051,12 +1119,7 @@ struct OptionsPopover: View {
                         .padding(.leading, 42)
                         .opacity(0.35)
 
-                    OptionToggleCard(
-                        title: "Calendar mode",
-                        detail: "Show scheduled to-dos below your list.",
-                        symbol: "calendar",
-                        isOn: $desktopCalendarMode
-                    )
+                    DesktopViewToggle(isCalendarView: $desktopCalendarMode)
                 }
 
                 Divider()
@@ -1280,6 +1343,55 @@ struct AppearanceToggle: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+struct DesktopViewToggle: View {
+    @Binding var isCalendarView: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label("Desktop view", systemImage: "rectangle.split.2x1")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 4) {
+                viewButton(
+                    title: "List View",
+                    symbol: "list.bullet",
+                    isSelected: !isCalendarView,
+                    action: { isCalendarView = false }
+                )
+                viewButton(
+                    title: "Calendar View",
+                    symbol: "calendar",
+                    isSelected: isCalendarView,
+                    action: { isCalendarView = true }
+                )
+            }
+            .padding(3)
+            .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(10)
+    }
+
+    private func viewButton(
+        title: LocalizedStringKey,
+        symbol: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 10, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 24)
+                .background(
+                    isSelected ? Color.primary.opacity(0.11) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 

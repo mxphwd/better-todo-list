@@ -57,19 +57,22 @@ struct MyApp: App {
             }
 
             CommandMenu("Views") {
-                Toggle(
-                    "Calendar View",
-                    isOn: Binding(
+                Picker(
+                    "View",
+                    selection: Binding(
                         get: { desktopMode && desktopCalendarMode },
-                        set: { isEnabled in
-                            if isEnabled {
+                        set: { useCalendarView in
+                            if useCalendarView {
                                 desktopMode = true
                             }
-                            desktopCalendarMode = isEnabled
+                            desktopCalendarMode = useCalendarView
                         }
                     )
-                )
-                .keyboardShortcut("k", modifiers: [.command, .option])
+                ) {
+                    Text("List View").tag(false)
+                    Text("Calendar View").tag(true)
+                }
+                .pickerStyle(.inline)
             }
         }
     }
