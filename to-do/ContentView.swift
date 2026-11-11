@@ -249,7 +249,8 @@ struct ListMenuSyncModifier: ViewModifier {
 struct TodoWorkspace: View {
     @AppStorage("desktopMode") private var desktopMode = false
     @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
-    @AppStorage("desktopCalendarSplitRatio") private var calendarSplitRatio = 0.52
+    @AppStorage("desktopCalendarSplitRatio") private var storedCalendarSplitRatio = 0.52
+    @State private var liveCalendarSplitRatio: Double?
     @State private var dragStartTopHeight: CGFloat?
     let store: TodoStore
     @Binding var editingItem: TodoItem?
@@ -262,12 +263,13 @@ struct TodoWorkspace: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let splitterHeight: CGFloat = 15
+            let splitterHeight: CGFloat = 7
             let availableHeight = max(proxy.size.height - splitterHeight, 1)
             let minimumListHeight: CGFloat = 150
             let minimumCalendarHeight: CGFloat = 170
             let maximumListHeight = max(minimumListHeight, availableHeight - minimumCalendarHeight)
-            let preferredListHeight = availableHeight * calendarSplitRatio
+            let splitRatio = liveCalendarSplitRatio ?? storedCalendarSplitRatio
+            let preferredListHeight = availableHeight * splitRatio
             let listHeight = min(max(preferredListHeight, minimumListHeight), maximumListHeight)
 
             VStack(spacing: 0) {
@@ -297,8 +299,18 @@ struct TodoWorkspace: View {
                 )
 
                 if desktopMode && desktopCalendarMode {
-                    CalendarSplitHandle()
+                    Divider()
                         .frame(height: splitterHeight)
+                        .contentShape(Rectangle())
+                        .onHover { hovering in
+                            #if os(macOS)
+                            if hovering {
+                                NSCursor.resizeUpDown.set()
+                            } else {
+                                NSCursor.arrow.set()
+                            }
+                            #endif
+                        }
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
@@ -309,9 +321,13 @@ struct TodoWorkspace: View {
                                         max(proposedHeight, minimumListHeight),
                                         maximumListHeight
                                     )
-                                    calendarSplitRatio = Double(clampedHeight / availableHeight)
+                                    liveCalendarSplitRatio = Double(clampedHeight / availableHeight)
                                 }
                                 .onEnded { _ in
+                                    if let liveCalendarSplitRatio {
+                                        storedCalendarSplitRatio = liveCalendarSplitRatio
+                                    }
+                                    liveCalendarSplitRatio = nil
                                     dragStartTopHeight = nil
                                 }
                         )
@@ -335,36 +351,6 @@ struct TodoWorkspace: View {
                 onRequestDeletion: onRequestDeletion
             )
         }
-    }
-}
-
-struct CalendarSplitHandle: View {
-    @State private var isHovered = false
-
-    var body: some View {
-        ZStack {
-            Divider()
-
-            Capsule()
-                .fill(.secondary.opacity(isHovered ? 0.72 : 0.42))
-                .frame(width: 34, height: isHovered ? 4 : 3)
-                .padding(.horizontal, 7)
-                .background(.ultraThinMaterial, in: Capsule())
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            isHovered = hovering
-            #if os(macOS)
-            if hovering {
-                NSCursor.resizeUpDown.set()
-            } else {
-                NSCursor.arrow.set()
-            }
-            #endif
-        }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
-        .accessibilityLabel("Resize list and calendar")
     }
 }
 
