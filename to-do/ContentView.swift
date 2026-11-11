@@ -34,6 +34,8 @@ struct ContentView: View {
     @AppStorage("confirmBeforeDeleting") private var confirmBeforeDeleting = false
     @AppStorage("appearanceMode") private var appearanceMode = "dark"
     @AppStorage("desktopMode") private var desktopMode = false
+    @AppStorage("fixDesktopLocation") private var fixDesktopLocation = false
+    @AppStorage("glassOpacity") private var glassOpacity = 0.82
     @State private var store = TodoStore()
     @State private var editingItem: TodoItem?
     @State private var isAddingList = false
@@ -111,7 +113,9 @@ struct ContentView: View {
         .background(
             WindowChromeConfigurator(
                 isCompact: isSidebarCompact,
-                isDesktopMode: desktopMode
+                isDesktopMode: desktopMode,
+                isLocationFixed: desktopMode && fixDesktopLocation,
+                glassOpacity: glassOpacity
             )
         )
         #endif
@@ -762,6 +766,7 @@ struct OptionsPopover: View {
     @AppStorage("glassOpacity") private var glassOpacity = 0.82
     @AppStorage("appearanceMode") private var appearanceMode = "dark"
     @AppStorage("desktopMode") private var desktopMode = false
+    @AppStorage("fixDesktopLocation") private var fixDesktopLocation = false
     @State private var launchesAtLogin: Bool
     @State private var requiresApproval = false
     @State private var errorMessage: String?
@@ -808,6 +813,19 @@ struct OptionsPopover: View {
                     isOn: $desktopMode
                 )
 
+                if desktopMode {
+                    Divider()
+                        .padding(.leading, 42)
+                        .opacity(0.35)
+
+                    OptionToggleCard(
+                        title: "Fix location",
+                        detail: "Prevent the window from being dragged.",
+                        symbol: "pin",
+                        isOn: $fixDesktopLocation
+                    )
+                }
+
                 Divider()
                     .padding(.leading, 42)
                     .opacity(0.35)
@@ -852,6 +870,7 @@ struct OptionsPopover: View {
         .frame(width: 330)
         .background(.thinMaterial)
         .animation(.easeInOut(duration: 0.2), value: requiresApproval)
+        .animation(.easeInOut(duration: 0.2), value: desktopMode)
         .animation(.easeOut(duration: 0.18), value: errorMessage)
     }
 
@@ -1092,7 +1111,7 @@ struct QuietOptionButtonStyle: ButtonStyle {
 struct GlassOpacitySlider: View {
     @Binding var value: Double
 
-    private let range = 0.2...1.0
+    private let range = 0.0...1.0
     private let dotCount = 9
     private let knobSize: CGFloat = 24
 
@@ -1169,17 +1188,29 @@ struct SidebarWindowControls: View {
             : AnyLayout(HStackLayout(spacing: 7))
 
         layout {
-            WindowActionButton(symbol: "xmark", color: .red, help: "Close") {
+            WindowActionButton(
+                symbol: "xmark",
+                color: Color(red: 0.85, green: 0.55, blue: 0.55),
+                help: "Close"
+            ) {
                 #if os(macOS)
                 NSApp.keyWindow?.performClose(nil)
                 #endif
             }
-            WindowActionButton(symbol: "minus", color: .yellow, help: "Minimize") {
+            WindowActionButton(
+                symbol: "minus",
+                color: Color(red: 0.85, green: 0.76, blue: 0.48),
+                help: "Minimize"
+            ) {
                 #if os(macOS)
                 NSApp.keyWindow?.performMiniaturize(nil)
                 #endif
             }
-            WindowActionButton(symbol: "plus", color: .green, help: "Zoom") {
+            WindowActionButton(
+                symbol: "plus",
+                color: Color(red: 0.53, green: 0.75, blue: 0.57),
+                help: "Zoom"
+            ) {
                 #if os(macOS)
                 NSApp.keyWindow?.performZoom(nil)
                 #endif
@@ -1212,11 +1243,11 @@ struct WindowActionButton: View {
                 .overlay {
                     Circle()
                         .stroke(
-                            isHovered ? color : Color.secondary.opacity(0.55),
+                            Color.secondary.opacity(isHovered ? 0.8 : 0.55),
                             lineWidth: isHovered ? 1.35 : 1
                         )
                         .shadow(
-                            color: isHovered ? color.opacity(0.9) : .clear,
+                            color: isHovered ? Color.secondary.opacity(0.3) : .clear,
                             radius: isHovered ? 4 : 0
                         )
                 }

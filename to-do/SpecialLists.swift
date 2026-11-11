@@ -372,6 +372,7 @@ extension TodoStore {
 }
 
 struct SpecialListDetailView: View {
+    @AppStorage("glassOpacity") private var glassOpacity = 0.82
     @Bindable var store: TodoStore
     let list: TodoList
 
@@ -390,7 +391,11 @@ struct SpecialListDetailView: View {
                 EmptyView()
             }
         }
-        .background(.ultraThinMaterial)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(glassOpacity)
+        }
     }
 }
 

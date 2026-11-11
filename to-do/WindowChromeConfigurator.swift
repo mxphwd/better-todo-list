@@ -6,21 +6,35 @@ import SwiftUI
 struct WindowChromeConfigurator: NSViewRepresentable {
     let isCompact: Bool
     let isDesktopMode: Bool
+    let isLocationFixed: Bool
+    let glassOpacity: Double
 
     func makeNSView(context: Context) -> WindowChromeView {
         let view = WindowChromeView()
-        view.updateConfiguration(isCompact: isCompact, isDesktopMode: isDesktopMode)
+        view.updateConfiguration(
+            isCompact: isCompact,
+            isDesktopMode: isDesktopMode,
+            isLocationFixed: isLocationFixed,
+            glassOpacity: glassOpacity
+        )
         return view
     }
 
     func updateNSView(_ nsView: WindowChromeView, context: Context) {
-        nsView.updateConfiguration(isCompact: isCompact, isDesktopMode: isDesktopMode)
+        nsView.updateConfiguration(
+            isCompact: isCompact,
+            isDesktopMode: isDesktopMode,
+            isLocationFixed: isLocationFixed,
+            glassOpacity: glassOpacity
+        )
     }
 }
 
 final class WindowChromeView: NSView {
     private var desiredCompactMode = false
     private var desiredDesktopMode = false
+    private var desiredLocationFixed = false
+    private var desiredGlassOpacity = 0.82
     private var appliedCompactMode: Bool?
     private var appliedDesktopMode: Bool?
     private weak var configuredWindow: NSWindow?
@@ -34,9 +48,16 @@ final class WindowChromeView: NSView {
         }
     }
 
-    func updateConfiguration(isCompact: Bool, isDesktopMode: Bool) {
+    func updateConfiguration(
+        isCompact: Bool,
+        isDesktopMode: Bool,
+        isLocationFixed: Bool,
+        glassOpacity: Double
+    ) {
         desiredCompactMode = isCompact
         desiredDesktopMode = isDesktopMode
+        desiredLocationFixed = isLocationFixed
+        desiredGlassOpacity = glassOpacity
         applyWindowConfiguration()
     }
 
@@ -46,6 +67,8 @@ final class WindowChromeView: NSView {
         hideNativeWindowButtons(in: window)
         removeUnusedMainMenus()
         applyDesktopMode(to: window)
+        applyLocationLock(to: window)
+        updateWindowShadow(for: window)
 
         guard let appliedCompactMode else {
             self.appliedCompactMode = desiredCompactMode
@@ -113,12 +136,19 @@ final class WindowChromeView: NSView {
             let desktopLevel = Int(CGWindowLevelForKey(.desktopIconWindow)) + 1
             window.level = NSWindow.Level(rawValue: desktopLevel)
             window.collectionBehavior.formUnion([.canJoinAllSpaces, .stationary, .ignoresCycle])
-            window.hasShadow = false
         } else {
             window.level = .normal
             window.collectionBehavior.subtract([.canJoinAllSpaces, .stationary, .ignoresCycle])
-            window.hasShadow = true
         }
+    }
+
+    private func applyLocationLock(to window: NSWindow) {
+        window.isMovable = !desiredLocationFixed
+        window.isMovableByWindowBackground = !desiredLocationFixed
+    }
+
+    private func updateWindowShadow(for window: NSWindow) {
+        window.hasShadow = !desiredDesktopMode && desiredGlassOpacity > 0.001
     }
 
     private func configureTransparentWindow(_ window: NSWindow) {
