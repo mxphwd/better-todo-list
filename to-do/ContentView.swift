@@ -259,41 +259,38 @@ struct TodoWorkspace: View {
     let onResetAllData: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarView(
-                store: store,
-                isAddingList: $isAddingList,
-                newListKind: $newListKind,
-                isEditingList: $isEditingList,
-                isCompact: $isSidebarCompact,
-                onRequestDeletion: onRequestDeletion,
-                onResetAllData: onResetAllData
-            )
-            .modifier(
-                SidebarAnimatedContainerModifier(compactProgress: isSidebarCompact ? 1 : 0)
-            )
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    SidebarView(
+                        store: store,
+                        isAddingList: $isAddingList,
+                        newListKind: $newListKind,
+                        isEditingList: $isEditingList,
+                        isCompact: $isSidebarCompact,
+                        onRequestDeletion: onRequestDeletion,
+                        onResetAllData: onResetAllData
+                    )
+                    .modifier(
+                        SidebarAnimatedContainerModifier(compactProgress: isSidebarCompact ? 1 : 0)
+                    )
 
-            Divider()
+                    Divider()
 
-            GeometryReader { proxy in
-                VStack(spacing: 0) {
                     detailContent
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: desktopMode && desktopCalendarMode
-                                ? proxy.size.height * 0.56
-                                : proxy.size.height,
-                            maxHeight: desktopMode && desktopCalendarMode
-                                ? proxy.size.height * 0.56
-                                : proxy.size.height
-                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(
+                    height: desktopMode && desktopCalendarMode
+                        ? proxy.size.height * 0.52
+                        : proxy.size.height
+                )
 
-                    if desktopMode && desktopCalendarMode {
-                        Divider()
+                if desktopMode && desktopCalendarMode {
+                    Divider()
 
-                        DesktopCalendarView(store: store)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    DesktopCalendarView(store: store)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -324,18 +321,22 @@ struct DesktopCalendarView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
 
     var body: some View {
-        VStack(spacing: 7) {
-            calendarHeader
-            weekdayHeader
+        GeometryReader { proxy in
+            let dayHeight = max(22, (proxy.size.height - 57) / 6)
 
-            LazyVGrid(columns: columns, spacing: 3) {
-                ForEach(monthDates, id: \.self) { date in
-                    calendarDay(date)
+            VStack(spacing: 5) {
+                calendarHeader
+                weekdayHeader
+
+                LazyVGrid(columns: columns, spacing: 2) {
+                    ForEach(monthDates, id: \.self) { date in
+                        calendarDay(date, height: dayHeight)
+                    }
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
         .background {
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -378,14 +379,14 @@ struct DesktopCalendarView: View {
         }
     }
 
-    private func calendarDay(_ date: Date) -> some View {
+    private func calendarDay(_ date: Date, height: CGFloat) -> some View {
         let colors = taskColors(on: date)
         let isToday = calendar.isDateInToday(date)
         let belongsToMonth = calendar.isDate(date, equalTo: displayedMonth, toGranularity: .month)
 
         return VStack(spacing: 2) {
             Text(date, format: .dateTime.day())
-                .font(.system(size: 10, weight: isToday ? .bold : .medium, design: .rounded))
+                .font(.system(size: 11, weight: isToday ? .bold : .medium, design: .rounded))
                 .foregroundStyle(belongsToMonth ? .primary : .quaternary)
 
             HStack(spacing: 2) {
@@ -397,7 +398,7 @@ struct DesktopCalendarView: View {
             }
             .frame(height: 3)
         }
-        .frame(maxWidth: .infinity, minHeight: 20)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
         .background(
             isToday ? Color.primary.opacity(0.09) : Color.clear,
             in: RoundedRectangle(cornerRadius: 6, style: .continuous)
