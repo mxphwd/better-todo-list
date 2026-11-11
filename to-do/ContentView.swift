@@ -534,6 +534,7 @@ struct SidebarAnimatedContainerModifier: AnimatableModifier {
 
 struct SidebarView: View {
     @AppStorage("desktopMode") private var desktopMode = false
+    @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
     @Bindable var store: TodoStore
     @Binding var isAddingList: Bool
     @Binding var newListKind: TodoListKind
@@ -548,14 +549,16 @@ struct SidebarView: View {
                 SidebarWindowControls(isCompact: isCompact)
             }
 
-            SidebarHeader(
-                isCompact: isCompact,
-                onToggleCompact: {
-                    withAnimation(.sidebarTransition) {
-                        isCompact.toggle()
+            if !desktopCalendarMode {
+                SidebarHeader(
+                    isCompact: isCompact,
+                    onToggleCompact: {
+                        withAnimation(.sidebarTransition) {
+                            isCompact.toggle()
+                        }
                     }
-                }
-            )
+                )
+            }
 
             ScrollView {
                 LazyVStack(spacing: 4) {
@@ -582,18 +585,20 @@ struct SidebarView: View {
                 .padding(.vertical, 8)
             }
 
-            SidebarFooter(
-                canDelete: store.selectedList != nil,
-                isCompact: isCompact,
-                onAddList: { kind in
-                    newListKind = kind
-                    isAddingList = true
-                },
-                onAddDivider: store.addDivider,
-                onEdit: { isEditingList = true },
-                onDelete: requestSelectedListDeletion,
-                onResetAllData: onResetAllData
-            )
+            if !desktopCalendarMode {
+                SidebarFooter(
+                    canDelete: store.selectedList != nil,
+                    isCompact: isCompact,
+                    onAddList: { kind in
+                        newListKind = kind
+                        isAddingList = true
+                    },
+                    onAddDivider: store.addDivider,
+                    onEdit: { isEditingList = true },
+                    onDelete: requestSelectedListDeletion,
+                    onResetAllData: onResetAllData
+                )
+            }
         }
     }
 
@@ -1493,19 +1498,22 @@ struct WindowActionButton: View {
 
 struct TaskListView: View {
     @AppStorage("glassOpacity") private var glassOpacity = 0.82
+    @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
     @Bindable var store: TodoStore
     @Binding var editingItem: TodoItem?
     let onRequestDeletion: (PendingDeletion) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            TaskListHeader(
-                title: store.selectedList?.name ?? "Tasks",
-                count: store.visibleItems.filter { !$0.isCompleted }.count,
-                sortMode: store.selectedTaskSortMode,
-                onSortModeChange: store.setTaskSortMode,
-                onAdd: addItem
-            )
+            if !desktopCalendarMode {
+                TaskListHeader(
+                    title: store.selectedList?.name ?? "Tasks",
+                    count: store.visibleItems.filter { !$0.isCompleted }.count,
+                    sortMode: store.selectedTaskSortMode,
+                    onSortModeChange: store.setTaskSortMode,
+                    onAdd: addItem
+                )
+            }
 
             if store.visibleItems.isEmpty {
                 EmptyTasksView(onAdd: addItem)
@@ -1556,17 +1564,19 @@ struct TaskListView: View {
                 .scrollContentBackground(.hidden)
             }
 
-            TaskListFooter(
-                selectionExists: store.selectedItem != nil,
-                onEdit: {
-                    editingItem = store.selectedItem
-                },
-                onDelete: {
-                    if let item = store.selectedItem {
-                        requestDeletion(for: [item])
+            if !desktopCalendarMode {
+                TaskListFooter(
+                    selectionExists: store.selectedItem != nil,
+                    onEdit: {
+                        editingItem = store.selectedItem
+                    },
+                    onDelete: {
+                        if let item = store.selectedItem {
+                            requestDeletion(for: [item])
+                        }
                     }
-                }
-            )
+                )
+            }
         }
         .background {
             Rectangle()

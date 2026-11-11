@@ -400,6 +400,7 @@ struct SpecialListDetailView: View {
 }
 
 struct SpecialListHeader: View {
+    @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
     let title: String
     let subtitle: LocalizedStringResource
     let addHelp: LocalizedStringKey
@@ -426,7 +427,9 @@ struct SpecialListHeader: View {
             .help(addHelp)
         }
         .padding(.horizontal, 18)
-        .frame(height: 58)
+        .frame(height: desktopCalendarMode ? 0 : 58)
+        .opacity(desktopCalendarMode ? 0 : 1)
+        .clipped()
         .overlay(alignment: .bottom) { Divider().opacity(0.45) }
     }
 }

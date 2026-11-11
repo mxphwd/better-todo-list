@@ -18,6 +18,8 @@ final class AppNavigationState {
 @main
 struct MyApp: App {
     @State private var appState = AppNavigationState()
+    @AppStorage("desktopMode") private var desktopMode = false
+    @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
 
     var body: some Scene {
         WindowGroup("Focus") {
@@ -52,6 +54,22 @@ struct MyApp: App {
                         modifiers: .control
                     )
                 }
+            }
+
+            CommandMenu("Views") {
+                Toggle(
+                    "Calendar View",
+                    isOn: Binding(
+                        get: { desktopMode && desktopCalendarMode },
+                        set: { isEnabled in
+                            if isEnabled {
+                                desktopMode = true
+                            }
+                            desktopCalendarMode = isEnabled
+                        }
+                    )
+                )
+                .keyboardShortcut("k", modifiers: [.command, .option])
             }
         }
     }
