@@ -247,6 +247,8 @@ struct ListMenuSyncModifier: ViewModifier {
 }
 
 struct TodoWorkspace: View {
+    @AppStorage("desktopMode") private var desktopMode = false
+    @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
     let store: TodoStore
     @Binding var editingItem: TodoItem?
     @Binding var isAddingList: Bool
@@ -273,17 +275,187 @@ struct TodoWorkspace: View {
 
             Divider()
 
-            if let selectedList = store.selectedList, !selectedList.listKind.usesStandardTasks {
-                SpecialListDetailView(store: store, list: selectedList)
-            } else {
-                TaskListView(
-                    store: store,
-                    editingItem: $editingItem,
-                    onRequestDeletion: onRequestDeletion
-                )
+            GeometryReader { proxy in
+                VStack(spacing: 0) {
+                    detailContent
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: desktopMode && desktopCalendarMode
+                                ? proxy.size.height * 0.56
+                                : proxy.size.height,
+                            maxHeight: desktopMode && desktopCalendarMode
+                                ? proxy.size.height * 0.56
+                                : proxy.size.height
+                        )
+
+                    if desktopMode && desktopCalendarMode {
+                        Divider()
+
+                        DesktopCalendarView(store: store)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
             }
         }
         .background(Color.clear)
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        if let selectedList = store.selectedList, !selectedList.listKind.usesStandardTasks {
+            SpecialListDetailView(store: store, list: selectedList)
+        } else {
+            TaskListView(
+                store: store,
+                editingItem: $editingItem,
+                onRequestDeletion: onRequestDeletion
+            )
+        }
+    }
+}
+
+struct DesktopCalendarView: View {
+    @AppStorage("glassOpacity") private var glassOpacity = 0.82
+    @State private var displayedMonth = Date()
+
+    let store: TodoStore
+
+    private let calendar = Calendar.autoupdatingCurrent
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
+
+    var body: some View {
+        VStack(spacing: 7) {
+            calendarHeader
+            weekdayHeader
+
+            LazyVGrid(columns: columns, spacing: 3) {
+                ForEach(monthDates, id: \.self) { date in
+                    calendarDay(date)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(glassOpacity)
+        }
+    }
+
+    private var calendarHeader: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(displayedMonth, format: .dateTime.month(.wide))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text(displayedMonth, format: .dateTime.year())
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Button("Today") {
+                displayedMonth = Date()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+
+            monthButton(symbol: "chevron.left", offset: -1)
+            monthButton(symbol: "chevron.right", offset: 1)
+        }
+    }
+
+    private var weekdayHeader: some View {
+        LazyVGrid(columns: columns, spacing: 0) {
+            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                Text(symbol.uppercased())
+                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.quaternary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func calendarDay(_ date: Date) -> some View {
+        let colors = taskColors(on: date)
+        let isToday = calendar.isDateInToday(date)
+        let belongsToMonth = calendar.isDate(date, equalTo: displayedMonth, toGranularity: .month)
+
+        return VStack(spacing: 2) {
+            Text(date, format: .dateTime.day())
+                .font(.system(size: 10, weight: isToday ? .bold : .medium, design: .rounded))
+                .foregroundStyle(belongsToMonth ? .primary : .quaternary)
+
+            HStack(spacing: 2) {
+                ForEach(colors, id: \.self) { listColor in
+                    Capsule()
+                        .fill(listColor.color)
+                        .frame(width: colors.count == 1 ? 12 : 5, height: 2.5)
+                }
+            }
+            .frame(height: 3)
+        }
+        .frame(maxWidth: .infinity, minHeight: 20)
+        .background(
+            isToday ? Color.primary.opacity(0.09) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(isToday ? Color.primary.opacity(0.16) : .clear, lineWidth: 1)
+        }
+    }
+
+    private func monthButton(symbol: String, offset: Int) -> some View {
+        Button {
+            if let month = calendar.date(byAdding: .month, value: offset, to: displayedMonth) {
+                displayedMonth = month
+            }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 8, weight: .bold))
+                .frame(width: 18, height: 18)
+                .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
+    private var monthDates: [Date] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: displayedMonth),
+              let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthInterval.start) else {
+            return []
+        }
+
+        return (0..<42).compactMap { dayOffset in
+            calendar.date(byAdding: .day, value: dayOffset, to: firstWeek.start)
+        }
+    }
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let firstIndex = max(0, min(calendar.firstWeekday - 1, symbols.count - 1))
+        return Array(symbols[firstIndex...]) + Array(symbols[..<firstIndex])
+    }
+
+    private func taskColors(on date: Date) -> [ListColor] {
+        let listColors = Dictionary(uniqueKeysWithValues: store.lists.map { ($0.id, $0.color) })
+        var seen = Set<ListColor>()
+
+        return store.items.compactMap { item in
+            guard item.hasSchedule,
+                  !item.isCompleted,
+                  calendar.isDate(item.dueDate, inSameDayAs: date),
+                  let color = listColors[item.listID],
+                  seen.insert(color).inserted else {
+                return nil
+            }
+            return color
+        }
+        .prefix(3)
+        .map { $0 }
     }
 }
 
@@ -767,6 +939,7 @@ struct OptionsPopover: View {
     @AppStorage("appearanceMode") private var appearanceMode = "dark"
     @AppStorage("desktopMode") private var desktopMode = false
     @AppStorage("fixDesktopLocation") private var fixDesktopLocation = false
+    @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
     @State private var launchesAtLogin: Bool
     @State private var requiresApproval = false
     @State private var errorMessage: String?
@@ -823,6 +996,17 @@ struct OptionsPopover: View {
                         detail: "Prevent the window from being dragged.",
                         symbol: "pin",
                         isOn: $fixDesktopLocation
+                    )
+
+                    Divider()
+                        .padding(.leading, 42)
+                        .opacity(0.35)
+
+                    OptionToggleCard(
+                        title: "Calendar mode",
+                        detail: "Show scheduled to-dos below your list.",
+                        symbol: "calendar",
+                        isOn: $desktopCalendarMode
                     )
                 }
 
