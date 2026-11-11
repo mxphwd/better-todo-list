@@ -249,6 +249,8 @@ struct ListMenuSyncModifier: ViewModifier {
 struct TodoWorkspace: View {
     @AppStorage("desktopMode") private var desktopMode = false
     @AppStorage("desktopCalendarMode") private var desktopCalendarMode = false
+    @AppStorage("desktopCalendarSplitRatio") private var calendarSplitRatio = 0.52
+    @State private var dragStartTopHeight: CGFloat?
     let store: TodoStore
     @Binding var editingItem: TodoItem?
     @Binding var isAddingList: Bool
@@ -260,6 +262,14 @@ struct TodoWorkspace: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let splitterHeight: CGFloat = 15
+            let availableHeight = max(proxy.size.height - splitterHeight, 1)
+            let minimumListHeight: CGFloat = 150
+            let minimumCalendarHeight: CGFloat = 170
+            let maximumListHeight = max(minimumListHeight, availableHeight - minimumCalendarHeight)
+            let preferredListHeight = availableHeight * calendarSplitRatio
+            let listHeight = min(max(preferredListHeight, minimumListHeight), maximumListHeight)
+
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     SidebarView(
@@ -282,12 +292,29 @@ struct TodoWorkspace: View {
                 }
                 .frame(
                     height: desktopMode && desktopCalendarMode
-                        ? proxy.size.height * 0.52
+                        ? listHeight
                         : proxy.size.height
                 )
 
                 if desktopMode && desktopCalendarMode {
-                    Divider()
+                    CalendarSplitHandle()
+                        .frame(height: splitterHeight)
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    let startHeight = dragStartTopHeight ?? listHeight
+                                    dragStartTopHeight = startHeight
+                                    let proposedHeight = startHeight + value.translation.height
+                                    let clampedHeight = min(
+                                        max(proposedHeight, minimumListHeight),
+                                        maximumListHeight
+                                    )
+                                    calendarSplitRatio = Double(clampedHeight / availableHeight)
+                                }
+                                .onEnded { _ in
+                                    dragStartTopHeight = nil
+                                }
+                        )
 
                     DesktopCalendarView(store: store)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -311,6 +338,36 @@ struct TodoWorkspace: View {
     }
 }
 
+struct CalendarSplitHandle: View {
+    @State private var isHovered = false
+
+    var body: some View {
+        ZStack {
+            Divider()
+
+            Capsule()
+                .fill(.secondary.opacity(isHovered ? 0.72 : 0.42))
+                .frame(width: 34, height: isHovered ? 4 : 3)
+                .padding(.horizontal, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovered = hovering
+            #if os(macOS)
+            if hovering {
+                NSCursor.resizeUpDown.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+            #endif
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .accessibilityLabel("Resize list and calendar")
+    }
+}
+
 struct DesktopCalendarView: View {
     @AppStorage("glassOpacity") private var glassOpacity = 0.82
     @State private var displayedMonth = Date()
@@ -322,7 +379,7 @@ struct DesktopCalendarView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let dayHeight = max(22, (proxy.size.height - 57) / 6)
+            let dayHeight = max(22, (proxy.size.height - 55) / 5)
 
             VStack(spacing: 5) {
                 calendarHeader
@@ -430,7 +487,7 @@ struct DesktopCalendarView: View {
             return []
         }
 
-        return (0..<42).compactMap { dayOffset in
+        return (0..<35).compactMap { dayOffset in
             calendar.date(byAdding: .day, value: dayOffset, to: firstWeek.start)
         }
     }
